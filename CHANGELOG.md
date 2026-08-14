@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 (2026-08-14)
+
+### 文档
+- README 补三张看板截图(总览 / 耗时·工具·模型 / 请求明细),采用 GitHub 托管绝对链接,修复 npm 页截图无法显示的问题
+- 新增 CHANGELOG 与发布流程说明(`RELEASE.md` + `scripts/release.mjs` 发布准备脚本)
+
+
 所有版本的变更记录,按时间倒序。版本号遵循语义化版本(SemVer):`feat` → minor,`fix` → patch。
 
 ## 0.1.1 (2026-08-14)
