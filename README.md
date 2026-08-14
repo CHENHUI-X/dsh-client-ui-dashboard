@@ -4,7 +4,13 @@ A real-time metrics dashboard tab for the [DeepSeek Harness](https://github.com/
 
 Adds a third tab — **看板 / Dashboard** — to the conversation view ring, next to 对话 (chat) and 轨迹 (trajectory). While a conversation runs, it visualizes the session's live metrics, updated in real time from the session snapshot and projection values:
 
-![metrics](docs/metrics.png)
+## Screenshots
+
+![Dashboard — overview, gauges & token usage](https://github.com/user-attachments/assets/4ef49c75-92f5-44ca-abd3-87326d9bf2cf)
+
+![Dashboard — timings, tools, models & trends](https://github.com/user-attachments/assets/ff452b5b-d092-4e2e-ae06-451e4a3710ac)
+
+![Dashboard — request details & diagnostics](https://github.com/user-attachments/assets/1747587d-923b-4a37-99f4-d73e519f50b6)
 
 ## What it shows
 

@@ -64,6 +64,7 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
+    "release:prep": "node scripts/release.mjs",
     "prepublishOnly": "npm run build"
   },
   "repository": {

@@ -4,7 +4,13 @@
 
 在对话视图环中新增第三个 tab——**看板**,与「对话」「轨迹」并列。对话进行时,实时可视化当前会话的各项指标(数据来自会话快照与投影值,随事件实时更新):
 
-![metrics](docs/metrics.png)
+## 界面预览
+
+![看板 — 总览、仪表盘与 Token 用量](https://github.com/user-attachments/assets/4ef49c75-92f5-44ca-abd3-87326d9bf2cf)
+
+![看板 — 耗时、工具、模型与趋势](https://github.com/user-attachments/assets/ff452b5b-d092-4e2e-ae06-451e4a3710ac)
+
+![看板 — 请求明细与诊断](https://github.com/user-attachments/assets/1747587d-923b-4a37-99f4-d73e519f50b6)
 
 ## 功能
 
