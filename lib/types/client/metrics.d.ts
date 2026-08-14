@@ -39,6 +39,10 @@ export interface RequestSample {
     provider: string | null;
     model: string | null;
     error: string | null;
+    /** Whether the provider reported token usage at all (false = usage fields are all 0 / missing). */
+    usageReported: boolean;
+    /** Estimated USD cost for this request, priced by its own model (same source as RequestDetail.costUsd). */
+    costUsd: number;
 }
 /** One tool call observed in the loaded window, attached to its owning request step. */
 export interface ToolCallDetail {

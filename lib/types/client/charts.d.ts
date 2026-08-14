@@ -22,6 +22,7 @@ export declare function DonutChart(props: {
     centerLabel?: string;
     centerValue?: string;
     valueFormatter?: (v: number) => string;
+    ariaLabel?: string;
 }): ReactNode;
 /** Legend rows for a chart. */
 export declare function Legend(props: {
@@ -56,6 +57,7 @@ export declare function SeriesBars(props: {
     emptyLabel?: string;
     /** Show the max value as a top-right caption for at-a-glance reading. */
     showMaxTag?: boolean;
+    ariaLabel?: string;
 }): ReactNode;
 /** One horizontal bar row (tool histogram / model split). */
 export interface RowDatum {
@@ -75,6 +77,9 @@ export interface RowDatum {
 export declare function HorizontalBars(props: {
     data: readonly RowDatum[];
     valueFormatter?: (v: number) => string;
+    /** Render each row's sub on its own line below the bar (rows with rich
+     *  subs such as models would otherwise overflow narrow cards). */
+    subBelow?: boolean;
 }): ReactNode;
 /**
  * Gradient area chart over a series (e.g. per-request cache hit rate).
@@ -89,6 +94,7 @@ export declare function AreaChart(props: {
     emptyLabel?: string;
     /** Show the max value as a top-right caption for at-a-glance reading. */
     showMaxTag?: boolean;
+    ariaLabel?: string;
 }): ReactNode;
 /**
  * Semi-circular gauge (e.g. context occupancy). Colors by threshold:
@@ -99,6 +105,7 @@ export declare function RadialGauge(props: {
     max: number;
     unit?: string;
     size?: number;
+    ariaLabel?: string;
 }): ReactNode;
 /** Tiny sparkline for StatCard trends (zero dependencies, SVG polyline). */
 export declare function Sparkline({ values, color, width, height }: {

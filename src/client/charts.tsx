@@ -62,8 +62,9 @@ export function DonutChart(props: {
   centerLabel?: string;
   centerValue?: string;
   valueFormatter?: (v: number) => string;
+  ariaLabel?: string;
 }): ReactNode {
-  const { data, size = 132, thickness = 15, centerLabel = "", centerValue, valueFormatter } = props;
+  const { data, size = 132, thickness = 15, centerLabel = "", centerValue, valueFormatter, ariaLabel } = props;
   const [hover, setHover] = useState<number | null>(null);
   const total = data.reduce((sum, d) => sum + Math.max(0, d.value), 0);
   const cx = size / 2;
@@ -105,7 +106,7 @@ export function DonutChart(props: {
   const hovered = hover !== null ? segments[hover] : undefined;
   const fmt = valueFormatter ?? ((v: number) => compactNumber(v));
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} role="img">
+    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} role="img" aria-label={ariaLabel ?? "donut chart"}>
       <g transform={`rotate(-90 ${cx} ${cy})`}>
         {segments.map((seg, i) => (
           <circle
@@ -242,8 +243,9 @@ export function SeriesBars(props: {
   emptyLabel?: string;
   /** Show the max value as a top-right caption for at-a-glance reading. */
   showMaxTag?: boolean;
+  ariaLabel?: string;
 }): ReactNode {
-  const { series, height = 110, valueFormatter, emptyLabel, showMaxTag = false } = props;
+  const { series, height = 110, valueFormatter, emptyLabel, showMaxTag = false, ariaLabel } = props;
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...series.map((s) => Math.max(0, s.value)));
   const fmt = valueFormatter ?? ((v: number) => compactNumber(v));
@@ -255,7 +257,7 @@ export function SeriesBars(props: {
     );
   }
   return (
-    <div className="dshd-vbars" style={{ height, position: "relative" }}>
+    <div className="dshd-vbars" style={{ height, position: "relative" }} role="img" aria-label={ariaLabel ?? "bar chart"}>
       {showMaxTag ? <div className="dshd-maxTag">{fmt(max)}</div> : null}
       {series.map((s, i) => {
         const v = Math.max(0, s.value);
@@ -317,8 +319,11 @@ export interface RowDatum {
 export function HorizontalBars(props: {
   data: readonly RowDatum[];
   valueFormatter?: (v: number) => string;
+  /** Render each row's sub on its own line below the bar (rows with rich
+   *  subs such as models would otherwise overflow narrow cards). */
+  subBelow?: boolean;
 }): ReactNode {
-  const { data, valueFormatter } = props;
+  const { data, valueFormatter, subBelow = false } = props;
   const max = Math.max(1, ...data.map((d) => Math.max(0, d.value)));
   const fmt = valueFormatter ?? ((v: number) => compactNumber(v));
   if (data.length === 0) {
@@ -340,8 +345,11 @@ export function HorizontalBars(props: {
               {fmt(d.value)}
               {d.errorMark === true ? <span className="dshd-errorMark"> ⚠</span> : null}
             </span>
-            {d.sub !== undefined ? <span className="dshd-hbarSub">{d.sub}</span> : null}
+            {d.sub !== undefined && !subBelow ? <span className="dshd-hbarSub" title={d.sub}>{d.sub}</span> : null}
           </span>
+          {d.sub !== undefined && subBelow ? (
+            <span className="dshd-hbarSubLine" title={d.sub}>{d.sub}</span>
+          ) : null}
         </div>
       ))}
     </div>
@@ -361,6 +369,7 @@ export function AreaChart(props: {
   emptyLabel?: string;
   /** Show the max value as a top-right caption for at-a-glance reading. */
   showMaxTag?: boolean;
+  ariaLabel?: string;
 }): ReactNode {
   const {
     series,
@@ -368,7 +377,8 @@ export function AreaChart(props: {
     color = "var(--dsw-alias-state-business-primary)",
     valueFormatter,
     emptyLabel,
-    showMaxTag = false
+    showMaxTag = false,
+    ariaLabel
   } = props;
   const [hover, setHover] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -410,7 +420,7 @@ export function AreaChart(props: {
       onMouseLeave={() => setHover(null)}
     >
       {showMaxTag ? <div className="dshd-maxTag">{fmt(max)}</div> : null}
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" role="img">
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" role="img" aria-label={ariaLabel ?? "area chart"}>
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity="0.32" />
@@ -459,8 +469,9 @@ export function RadialGauge(props: {
   max: number;
   unit?: string;
   size?: number;
+  ariaLabel?: string;
 }): ReactNode {
-  const { value, max, unit = "", size = 148 } = props;
+  const { value, max, unit = "", size = 148, ariaLabel } = props;
   const frac = max <= 0 ? 0 : Math.max(0, Math.min(1, value / max));
   const color =
     frac >= 0.9
@@ -479,7 +490,7 @@ export function RadialGauge(props: {
   const valueArc = frac <= 0 ? "" : arcPath(cx, cy, r, 180, 180 + frac * 180);
   const valueY = cy - r * 0.4;
   return (
-    <svg viewBox={`0 0 ${size} ${height}`} width={size} height={height} role="img" style={{ overflow: "hidden" }}>
+    <svg viewBox={`0 0 ${size} ${height}`} width={size} height={height} role="img" aria-label={ariaLabel ?? "gauge"} style={{ overflow: "hidden" }}>
       <path d={track} fill="none" stroke="var(--dsw-alias-border-l1)" strokeWidth={11} strokeLinecap="round" />
       {frac > 0 ? (
         <path d={valueArc} fill="none" stroke={color} strokeWidth={11} strokeLinecap="round" style={{ transition: "stroke .3s ease" }} />
@@ -586,8 +597,12 @@ export function ModelTimeline({
   return (
     <div className="dshd-modelTimeline" role="img" aria-label={ariaLabel ?? "model timeline"}>
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ display: "block" }}>
+        <line x1={2} y1={height / 2} x2={width - 2} y2={height / 2} stroke="var(--dsw-alias-border-l2)" strokeWidth={1} />
         {trimmed.map((d, i) => {
           const isSwitch = switchSeqs.includes(d.seq);
+          // Only switch points and the newest dot are keyboard stops; the rest
+          // stay in the accessibility tree (aria-label) but off the Tab order.
+          const focusable = onPick !== undefined && (isSwitch || i === trimmed.length - 1);
           return (
             <circle
               key={d.seq}
@@ -599,7 +614,7 @@ export function ModelTimeline({
               strokeWidth={isSwitch ? 1.2 : 0}
               opacity={isSwitch ? 1 : 0.72}
               role={onPick !== undefined ? "button" : undefined}
-              tabIndex={onPick !== undefined ? 0 : undefined}
+              tabIndex={onPick !== undefined ? (focusable ? 0 : -1) : undefined}
               aria-label={`#${d.seq} · ${d.model}`}
               onClick={onPick === undefined ? undefined : () => onPick(d.seq)}
               onKeyDown={onPick === undefined ? undefined : (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(d.seq); } }}

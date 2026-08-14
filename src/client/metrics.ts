@@ -41,6 +41,10 @@ export interface RequestSample {
   provider: string | null;
   model: string | null;
   error: string | null;
+  /** Whether the provider reported token usage at all (false = usage fields are all 0 / missing). */
+  usageReported: boolean;
+  /** Estimated USD cost for this request, priced by its own model (same source as RequestDetail.costUsd). */
+  costUsd: number;
 }
 
 /** One tool call observed in the loaded window, attached to its owning request step. */
@@ -438,23 +442,33 @@ export function countRoles(nodes: readonly ConversationNode[]): RoleCounts {
 export function indexToolCalls(nodes: readonly ConversationNode[]): Map<number, ToolCallDetail[]> {
   const byRequest = new Map<number, ToolCallDetail[]>();
   let currentSeq: number | null = null;
+  const add = (detail: ToolCallDetail) => {
+    const key = currentSeq ?? -1;
+    const list = byRequest.get(key);
+    if (list === undefined) byRequest.set(key, [detail]);
+    else list.push(detail);
+  };
+  const collect = (node: ToolResultNode) => {
+    add({
+      callId: node.callId,
+      name: node.call?.name ?? "tool",
+      argsRaw: node.call?.argsRaw ?? null,
+      durationMs: node.callTime !== null ? Math.max(0, node.time - node.callTime) : null,
+      isError: node.isError
+    });
+    for (const sub of node.subCalls) {
+      if ("subCalls" in sub && Array.isArray((sub as ToolResultNode).subCalls)) {
+        collect(sub as ToolResultNode); // nested tool-result: keep the ledger consistent with the histogram
+      }
+    }
+  };
   for (const node of nodes) {
     if (node.kind === "assistant") {
       currentSeq = node.seq;
       continue;
     }
     if (node.kind !== "tool-result") continue;
-    const detail: ToolCallDetail = {
-      callId: node.callId,
-      name: node.call?.name ?? "tool",
-      argsRaw: node.call?.argsRaw ?? null,
-      durationMs: node.callTime !== null ? Math.max(0, node.time - node.callTime) : null,
-      isError: node.isError
-    };
-    const key = currentSeq ?? -1;
-    const list = byRequest.get(key);
-    if (list === undefined) byRequest.set(key, [detail]);
-    else list.push(detail);
+    collect(node);
   }
   return byRequest;
 }
@@ -471,9 +485,13 @@ export function toolHistogram(nodes: readonly ConversationNode[]): ToolCallSampl
   const walk = (node: ToolResultNode) => {
     bump(node.call?.name ?? "tool", node.isError);
     for (const sub of node.subCalls) {
-      const name = "name" in sub ? sub.name : sub.call?.name ?? "tool";
-      const isError = "isError" in sub && sub.isError === true;
-      bump(name, isError);
+      if ("subCalls" in sub && Array.isArray((sub as ToolResultNode).subCalls)) {
+        walk(sub as ToolResultNode); // nested tool-result: recurse so depth ≥ 2 sub-calls are counted
+      } else {
+        const name = "name" in sub ? sub.name : sub.call?.name ?? "tool";
+        const isError = "isError" in sub && sub.isError === true;
+        bump(name, isError);
+      }
     }
   };
   for (const node of nodes) {
@@ -599,7 +617,19 @@ export function requestSeries(
       durationMs,
       provider: request.provenance?.provider ?? request.requestConfig?.provider ?? null,
       model: request.provenance?.model ?? request.requestConfig?.model ?? null,
-      error: request.error ?? null
+      error: request.error ?? null,
+      usageReported:
+        toInt(usage.inputTokens) > 0 ||
+        toInt(usage.cacheReadTokens) > 0 ||
+        toInt(usage.cacheWriteTokens) > 0 ||
+        toInt(usage.outputTokens) > 0 ||
+        toInt(usage.reasoningTokens) > 0,
+      costUsd: estimateRequestCostUsd(request.provenance?.model ?? request.requestConfig?.model ?? null, {
+        uncachedInputTokens: input - toInt(usage.cacheReadTokens) - toInt(usage.cacheWriteTokens),
+        cacheReadTokens: toInt(usage.cacheReadTokens),
+        cacheWriteTokens: toInt(usage.cacheWriteTokens),
+        outputTokens: toInt(usage.outputTokens)
+      })
     };
     series.push(sample);
     // Drill-down: tool calls that ran under this request's step (matched by
@@ -618,12 +648,7 @@ export function requestSeries(
       promptSystemChars: prompt?.system === undefined ? null : prompt.system.length,
       promptToolNames: prompt?.tools?.map((t) => t.name ?? "").filter((n) => n.length > 0) ?? [],
       toolCalls: calls,
-      costUsd: estimateRequestCostUsd(sample.model, {
-        uncachedInputTokens: sample.inputTokens - sample.cacheReadTokens - sample.cacheWriteTokens,
-        cacheReadTokens: sample.cacheReadTokens,
-        cacheWriteTokens: sample.cacheWriteTokens,
-        outputTokens: sample.outputTokens
-      })
+      costUsd: sample.costUsd
     });
   }
   // Newest first, stable by seq.
@@ -667,6 +692,7 @@ export function modelSplit(
     row.requests += 1;
     row.inputTokens += s.inputTokens;
     row.outputTokens += s.outputTokens;
+    row.costUsd += s.costUsd;
     if (s.status === "error") row.errorCount += 1;
     if (s.durationMs !== null) {
       row.durSum += s.durationMs;
@@ -1020,9 +1046,9 @@ export function deriveMetrics(input: DeriveInput, nowMs: number): DashboardMetri
   }
   const toolStorm = throughput.map((b) => ({ bucketMs: b.bucketMs, calls: b.calls }));
 
-  // No-progress: completed requests with tiny output yet ≥3 tool calls.
+  // No-progress: completed requests that actually reported usage, tiny output yet ≥3 tool calls.
   const noProgress = details
-    .filter((d) => d.status === "complete" && d.outputTokens < 50 && d.toolCalls.length >= 3)
+    .filter((d) => d.status === "complete" && d.usageReported && d.outputTokens < 50 && d.toolCalls.length >= 3)
     .map((d) => ({ seq: d.seq, turn: d.turn, outputTokens: d.outputTokens, toolCalls: d.toolCalls.length }));
 
   // Loop detection over the whole window's tool sequence.
