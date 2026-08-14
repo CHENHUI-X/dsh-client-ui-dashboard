@@ -39,7 +39,10 @@ export const CHART_COLORS = {
 } as const;
 
 const css = String.raw`
-.dshd-root{display:flex;flex-direction:column;gap:16px;padding:16px 18px 28px;max-width:1120px;margin:0 auto;width:100%;box-sizing:border-box;color:var(--dsw-alias-label-primary)}
+/* 看板自持内部滚动容器：声明 data-conversation-composer-overlay 后，共享
+   滚动体让位、输入框改绝对定位，本根元素成为会话列内唯一的滚动区；底部
+   预留 --dsh-composer-height 让最后一行滚动时不被输入框遮挡。 */
+.dshd-root{display:flex;flex-direction:column;gap:16px;padding:16px 18px 28px;max-width:1120px;margin:0 auto;width:100%;box-sizing:border-box;color:var(--dsw-alias-label-primary);height:100%;overflow-y:auto;padding-bottom:calc(28px + var(--dsh-composer-height,0px))}
 .dshd-root *{box-sizing:border-box}
 .dshd-muted{color:var(--dsw-alias-label-tertiary)}
 .dshd-empty{color:var(--dsw-alias-label-tertiary);font-size:12px;text-align:center;padding:18px 0}
