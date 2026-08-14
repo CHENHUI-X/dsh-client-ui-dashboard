@@ -22,6 +22,8 @@ export interface UsageLike {
 export interface RequestSample {
   /** Start event seq (stable ordering key). */
   seq: number;
+  /** Assistant-message node seq produced by this request (TTFT / tool-call association key); null when unknown. */
+  resultSeq: number | null;
   turn: number;
   step: number;
   status: "running" | "complete" | "error";
@@ -63,6 +65,8 @@ export interface RequestDetail extends RequestSample {
   promptSystemChars: number | null;
   promptToolNames: readonly string[];
   toolCalls: readonly ToolCallDetail[];
+  /** Estimated USD cost for this request, priced by its own model. */
+  costUsd: number;
 }
 
 /** Tool call histogram. */
@@ -104,6 +108,8 @@ export interface ModelSplitRow {
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  /** Estimated USD cost of this model's requests (each priced by its own model). */
+  costUsd: number;
   /** Mean wall time of completed requests for this model; null when none. */
   avgDurationMs: number | null;
   /** Mean TTFT over observable window samples for this model; null when none. */
@@ -179,6 +185,8 @@ export interface DashboardMetrics {
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
+  /** Window-scoped output total (used so the reasoning share is window ÷ window). */
+  windowOutputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
   cacheHitPercent: number | null;
@@ -213,7 +221,7 @@ export interface DashboardMetrics {
   failedStats: { count: number; avgDurationMs: number | null; avgInputTokens: number | null };
   completedStats: { count: number; avgDurationMs: number | null; avgInputTokens: number | null };
   // Minute-bucketed activity (window, oldest → newest).
-  throughput: { bucketMs: number; requests: number; inputTokens: number; outputTokens: number }[];
+  throughput: { bucketMs: number; requests: number; inputTokens: number; outputTokens: number; failed: number }[];
   // Rough USD cost estimate (DeepSeek public pricing) + cache savings.
   costEstimateUsd: { total: number; cacheSavings: number };
   // Agent-health diagnostics (window)
@@ -226,6 +234,10 @@ export interface DashboardMetrics {
   // Model timeline (window, oldest → newest): per-request model + switch points.
   modelTimeline: { seq: number; turn: number; model: string }[];
   modelSwitchSeqs: number[];
+  // TTFT split by cache state (window): does a cache hit actually reach the first token faster?
+  ttftByCache: { hitAvgMs: number | null; hitN: number; missAvgMs: number | null; missN: number };
+  // Context occupancy over the window (per-request input ÷ context window); pct null when no window size.
+  contextTrend: { seq: number; turn: number; inputTokens: number; pct: number | null }[];
   // Context-injection sources (window): label/form → count + chars.
   contextInjection: { label: string; role: string; form: string; count: number; chars: number }[];
   // Output tokens excluding reasoning (avoids double counting when the
@@ -271,6 +283,7 @@ export const EMPTY_METRICS: DashboardMetrics = {
   inputTokens: 0,
   outputTokens: 0,
   reasoningTokens: 0,
+  windowOutputTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
   cacheHitPercent: null,
@@ -299,6 +312,8 @@ export const EMPTY_METRICS: DashboardMetrics = {
   toolStorm: [],
   modelTimeline: [],
   modelSwitchSeqs: [],
+  ttftByCache: { hitAvgMs: null, hitN: 0, missAvgMs: null, missN: 0 },
+  contextTrend: [],
   contextInjection: [],
   llmMs: 0,
   toolMs: 0,
@@ -349,6 +364,41 @@ export function billedInputTokens(u: TokenUsageProjection): number {
 export function cacheHitPercent(u: TokenUsageProjection): number | null {
   const total = billedInputTokens(u);
   return total === 0 ? null : Math.round((u.cacheReadTokens / total) * 100);
+}
+
+/**
+ * Per-1M-token prices (DeepSeek public pricing). Cache writes bill at the
+ * miss rate. reasoner detection is a model-name heuristic (adapter names
+ * vary); callers may refine it once the framework exposes a canonical flag.
+ */
+export const DEEPSEEK_PRICES = {
+  chat: { miss: 0.27, hit: 0.07, output: 1.1 },
+  reasoner: { miss: 0.55, hit: 0.14, output: 2.19 }
+} as const;
+
+/** Pricing tier for a model name (heuristic). */
+export function isReasonerModel(model: string | null): boolean {
+  return /reasoner/i.test(model ?? "");
+}
+
+/** Estimated USD cost of one request, priced by its own model. */
+export function estimateRequestCostUsd(
+  model: string | null,
+  usage: { uncachedInputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
+): number {
+  const p = isReasonerModel(model) ? DEEPSEEK_PRICES.reasoner : DEEPSEEK_PRICES.chat;
+  return (
+    ((usage.uncachedInputTokens + usage.cacheWriteTokens) * p.miss +
+      usage.cacheReadTokens * p.hit +
+      usage.outputTokens * p.output) /
+    1_000_000
+  );
+}
+
+/** Cache savings of one request (cache reads billed at miss rate), priced by its own model. */
+export function estimateCacheSavingsUsd(model: string | null, cacheReadTokens: number): number {
+  const miss = isReasonerModel(model) ? DEEPSEEK_PRICES.reasoner.miss : DEEPSEEK_PRICES.chat.miss;
+  return (cacheReadTokens * miss) / 1_000_000;
 }
 
 /** Count conversation nodes by dashboard role buckets. */
@@ -508,8 +558,10 @@ export function modelSwitchCount(series: readonly RequestSample[]): number {
   let switches = 0;
   let prev: string | null = null;
   // series is newest-first; walk reversed to compare chronologically.
+  // Requests with an unknown model (null) are skipped, not counted as a switch.
   for (let i = series.length - 1; i >= 0; i -= 1) {
     const current = series[i]?.model ?? null;
+    if (current === null) continue;
     if (prev !== null && current !== prev) switches += 1;
     prev = current;
   }
@@ -533,6 +585,7 @@ export function requestSeries(
         : null;
     const sample: RequestSample = {
       seq: request.startSeq,
+      resultSeq: request.resultSeq ?? null,
       turn: request.turn ?? 0,
       step: request.step ?? 0,
       status: request.status,
@@ -564,7 +617,13 @@ export function requestSeries(
       retryDelayMs: request.retryDelayMs ?? null,
       promptSystemChars: prompt?.system === undefined ? null : prompt.system.length,
       promptToolNames: prompt?.tools?.map((t) => t.name ?? "").filter((n) => n.length > 0) ?? [],
-      toolCalls: calls
+      toolCalls: calls,
+      costUsd: estimateRequestCostUsd(sample.model, {
+        uncachedInputTokens: sample.inputTokens - sample.cacheReadTokens - sample.cacheWriteTokens,
+        cacheReadTokens: sample.cacheReadTokens,
+        cacheWriteTokens: sample.cacheWriteTokens,
+        outputTokens: sample.outputTokens
+      })
     });
   }
   // Newest first, stable by seq.
@@ -598,6 +657,7 @@ export function modelSplit(
       requests: 0,
       inputTokens: 0,
       outputTokens: 0,
+      costUsd: 0,
       errorCount: 0,
       durSum: 0,
       durN: 0,
@@ -612,7 +672,7 @@ export function modelSplit(
       row.durSum += s.durationMs;
       row.durN += 1;
     }
-    const t = ttftBySeq.get(s.seq);
+    const t = s.resultSeq !== null ? ttftBySeq.get(s.resultSeq) : undefined;
     if (t !== undefined) {
       row.ttftSum += t;
       row.ttftN += 1;
@@ -626,6 +686,7 @@ export function modelSplit(
       requests: r.requests,
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
+      costUsd: r.costUsd,
       errorCount: r.errorCount,
       avgDurationMs: r.durN > 0 ? Math.round(r.durSum / r.durN) : null,
       avgTtftMs: r.ttftN > 0 ? Math.round(r.ttftSum / r.ttftN) : null
@@ -684,7 +745,8 @@ function percentileStats(values: number[]): DurationStats {
   const buckets = Array.from({ length: n }, (_, b) => {
     const lo = (max * b) / n;
     const hi = (max * (b + 1)) / n;
-    const count = ds.filter((d) => d >= lo && d < hi).length;
+    // The last bucket is closed on both ends so the max sample is not dropped.
+    const count = ds.filter((d) => (b === n - 1 ? d >= lo && d <= hi : d >= lo && d < hi)).length;
     return { loMs: Math.round(lo), hiMs: Math.round(hi), count };
   });
   return { p50: pct(50), p95: pct(95), p99: pct(99), sampleCount: ds.length, buckets };
@@ -826,7 +888,7 @@ export interface DeriveInput {
 }
 
 /** One-pass derivation of every dashboard figure. */
-export function deriveMetrics(input: DeriveInput): DashboardMetrics {
+export function deriveMetrics(input: DeriveInput, nowMs: number): DashboardMetrics {
   const toolCalls = indexToolCalls(input.nodes);
   const { series, details } = requestSeries(input.requests, toolCalls);
   const roles = countRoles(input.nodes);
@@ -929,7 +991,7 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
     .sort((a, b) => a.t - b.t);
   const callsPerSeq = new Map<number, number>();
   for (const d of details) callsPerSeq.set(d.seq, d.toolCalls.length);
-  let throughput: { bucketMs: number; requests: number; inputTokens: number; outputTokens: number; calls: number }[] = [];
+  let throughput: { bucketMs: number; requests: number; inputTokens: number; outputTokens: number; calls: number; failed: number }[] = [];
   if (started.length > 0) {
     const first = started[0]!.t;
     const last = started[started.length - 1]!.t;
@@ -941,7 +1003,8 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
       requests: 0,
       inputTokens: 0,
       outputTokens: 0,
-      calls: 0
+      calls: 0,
+      failed: 0
     }));
     for (const { s, t } of started) {
       const idx = Math.min(bucketCount - 1, Math.floor((t - first) / bucketMs));
@@ -951,6 +1014,7 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
       b.inputTokens += s.inputTokens;
       b.outputTokens += s.outputTokens;
       b.calls += callsPerSeq.get(s.seq) ?? 0;
+      if (s.status === "error") b.failed += 1;
     }
     throughput = buckets;
   }
@@ -965,12 +1029,20 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
   const loops = detectLoops(details);
 
   // Model timeline (oldest → newest) + switch points.
+  // Requests with an unknown model ("?") are skipped for switch detection so
+  // counting (modelSwitchCount) and the timeline rings stay consistent.
   const modelTimeline = [...series]
     .reverse()
     .map((s) => ({ seq: s.seq, turn: s.turn, model: s.model ?? "?" }));
-  const modelSwitchSeqs = modelTimeline
-    .filter((m, i) => i > 0 && m.model !== modelTimeline[i - 1]!.model)
-    .map((m) => m.seq);
+  const modelSwitchSeqs: number[] = [];
+  {
+    let prev: string | null = null;
+    for (const m of modelTimeline) {
+      if (m.model === "?") continue;
+      if (prev !== null && m.model !== prev) modelSwitchSeqs.push(m.seq);
+      prev = m.model;
+    }
+  }
 
   const tokenUsage = input.tokenUsage;
   const inputTokens = tokenUsage === undefined ? 0 : billedInputTokens(tokenUsage);
@@ -979,23 +1051,15 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
   const cacheWriteTokens = tokenUsage?.cacheWriteTokens ?? 0;
   const hit = tokenUsage === undefined ? null : cacheHitPercent(tokenUsage);
   const reasoningTokens = totalReasoning(series);
+  /** Window-scoped output total (the reasoning share is window ÷ window). */
+  const windowOutputTokens = series.reduce((sum, s) => sum + s.outputTokens, 0);
 
-  // Rough USD cost estimate (DeepSeek public pricing; cache hit/miss rates).
-  // Prices per 1M tokens: reasoner miss 0.55 / hit 0.14 / output 2.19;
-  // chat: miss 0.27 / hit 0.07 / output 1.10. Cache writes bill at miss rate.
+  // Per-request cost (each request priced by its own model) + cache savings.
   let costTotal = 0;
   let costSavings = 0;
-  if (tokenUsage !== undefined) {
-    const isReasoner = /reasoner/i.test(series[0]?.model ?? "");
-    const miss = isReasoner ? 0.55 : 0.27;
-    const hitPrice = isReasoner ? 0.14 : 0.07;
-    const out = isReasoner ? 2.19 : 1.1;
-    const uncached = tokenUsage.uncachedInputTokens ?? 0;
-    const cacheRead = tokenUsage.cacheReadTokens ?? 0;
-    const cacheWrite = tokenUsage.cacheWriteTokens ?? 0;
-    const output = tokenUsage.outputTokens ?? 0;
-    costTotal = ((uncached + cacheWrite) * miss + cacheRead * hitPrice + output * out) / 1_000_000;
-    costSavings = (cacheRead * miss) / 1_000_000;
+  for (const d of details) {
+    costTotal += d.costUsd;
+    costSavings += estimateCacheSavingsUsd(d.model, d.cacheReadTokens);
   }
 
   const stats = input.stats;
@@ -1004,6 +1068,44 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
     stats !== undefined && stats.decodeMs > 0 ? (stats.decodeTokens / stats.decodeMs) * 1000 : null;
   const totalDurationMs = (stats?.llmMs ?? 0) + (stats?.toolMs ?? 0);
   const ttftBySeq = new Map(ttft.map((t) => [t.seq, t.ttftMs]));
+
+  // Cache hit vs miss TTFT (per request, keyed by assistant node seq).
+  const ttftByCache = (() => {
+    let hitSum = 0;
+    let hitN = 0;
+    let missSum = 0;
+    let missN = 0;
+    for (const s of series) {
+      if (s.status === "running") continue;
+      const t = s.resultSeq !== null ? ttftBySeq.get(s.resultSeq) : undefined;
+      if (t === undefined) continue;
+      if (s.cacheReadTokens > 0) {
+        hitSum += t;
+        hitN += 1;
+      } else {
+        missSum += t;
+        missN += 1;
+      }
+    }
+    return {
+      hitAvgMs: hitN > 0 ? Math.round(hitSum / hitN) : null,
+      hitN,
+      missAvgMs: missN > 0 ? Math.round(missSum / missN) : null,
+      missN
+    };
+  })();
+
+  // Context occupancy over the window: per-request input ÷ context window.
+  const contextWindow = input.pressure?.contextWindow ?? null;
+  const contextTrend = [...series].reverse().map((s) => ({
+    seq: s.seq,
+    turn: s.turn,
+    inputTokens: s.inputTokens,
+    pct:
+      contextWindow !== null && contextWindow > 0
+        ? Math.min(100, Math.round((s.inputTokens / contextWindow) * 100))
+        : null
+  }));
 
   return {
     running: input.running,
@@ -1016,6 +1118,7 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
     inputTokens,
     outputTokens,
     reasoningTokens,
+    windowOutputTokens,
     cacheReadTokens,
     cacheWriteTokens,
     cacheHitPercent: hit,
@@ -1043,6 +1146,8 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
     toolStorm,
     modelTimeline,
     modelSwitchSeqs,
+    ttftByCache,
+    contextTrend,
     contextInjection: contextInjection(input.nodes),
     costEstimateUsd: { total: costTotal, cacheSavings: costSavings },
     llmMs: stats?.llmMs ?? 0,
@@ -1054,7 +1159,7 @@ export function deriveMetrics(input: DeriveInput): DashboardMetrics {
     avgTtftMs,
     decodeTokensPerSec,
     totalDurationMs,
-    turnDurations: turnDurations(input.snapshot, input.nodes, Date.now()),
+    turnDurations: turnDurations(input.snapshot, input.nodes, nowMs),
     context: input.context ?? null,
     pressure: input.pressure ?? null,
     series,

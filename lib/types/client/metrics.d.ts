@@ -20,6 +20,8 @@ export interface UsageLike {
 export interface RequestSample {
     /** Start event seq (stable ordering key). */
     seq: number;
+    /** Assistant-message node seq produced by this request (TTFT / tool-call association key); null when unknown. */
+    resultSeq: number | null;
     turn: number;
     step: number;
     status: "running" | "complete" | "error";
@@ -59,6 +61,8 @@ export interface RequestDetail extends RequestSample {
     promptSystemChars: number | null;
     promptToolNames: readonly string[];
     toolCalls: readonly ToolCallDetail[];
+    /** Estimated USD cost for this request, priced by its own model. */
+    costUsd: number;
 }
 /** Tool call histogram. */
 export interface ToolCallSample {
@@ -95,6 +99,8 @@ export interface ModelSplitRow {
     requests: number;
     inputTokens: number;
     outputTokens: number;
+    /** Estimated USD cost of this model's requests (each priced by its own model). */
+    costUsd: number;
     /** Mean wall time of completed requests for this model; null when none. */
     avgDurationMs: number | null;
     /** Mean TTFT over observable window samples for this model; null when none. */
@@ -166,6 +172,8 @@ export interface DashboardMetrics {
     inputTokens: number;
     outputTokens: number;
     reasoningTokens: number;
+    /** Window-scoped output total (used so the reasoning share is window ÷ window). */
+    windowOutputTokens: number;
     cacheReadTokens: number;
     cacheWriteTokens: number;
     cacheHitPercent: number | null;
@@ -209,6 +217,7 @@ export interface DashboardMetrics {
         requests: number;
         inputTokens: number;
         outputTokens: number;
+        failed: number;
     }[];
     costEstimateUsd: {
         total: number;
@@ -238,6 +247,18 @@ export interface DashboardMetrics {
         model: string;
     }[];
     modelSwitchSeqs: number[];
+    ttftByCache: {
+        hitAvgMs: number | null;
+        hitN: number;
+        missAvgMs: number | null;
+        missN: number;
+    };
+    contextTrend: {
+        seq: number;
+        turn: number;
+        inputTokens: number;
+        pct: number | null;
+    }[];
     contextInjection: {
         label: string;
         role: string;
@@ -270,6 +291,34 @@ export declare const EMPTY_METRICS: DashboardMetrics;
 export declare function billedInputTokens(u: TokenUsageProjection): number;
 /** Cache-hit share of billed prompt input; null when nothing was billed. */
 export declare function cacheHitPercent(u: TokenUsageProjection): number | null;
+/**
+ * Per-1M-token prices (DeepSeek public pricing). Cache writes bill at the
+ * miss rate. reasoner detection is a model-name heuristic (adapter names
+ * vary); callers may refine it once the framework exposes a canonical flag.
+ */
+export declare const DEEPSEEK_PRICES: {
+    readonly chat: {
+        readonly miss: 0.27;
+        readonly hit: 0.07;
+        readonly output: 1.1;
+    };
+    readonly reasoner: {
+        readonly miss: 0.55;
+        readonly hit: 0.14;
+        readonly output: 2.19;
+    };
+};
+/** Pricing tier for a model name (heuristic). */
+export declare function isReasonerModel(model: string | null): boolean;
+/** Estimated USD cost of one request, priced by its own model. */
+export declare function estimateRequestCostUsd(model: string | null, usage: {
+    uncachedInputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    outputTokens: number;
+}): number;
+/** Cache savings of one request (cache reads billed at miss rate), priced by its own model. */
+export declare function estimateCacheSavingsUsd(model: string | null, cacheReadTokens: number): number;
 /** Count conversation nodes by dashboard role buckets. */
 export declare function countRoles(nodes: readonly ConversationNode[]): RoleCounts;
 /**
@@ -364,4 +413,4 @@ export interface DeriveInput {
     pressure: ContextPressureProjection | undefined;
 }
 /** One-pass derivation of every dashboard figure. */
-export declare function deriveMetrics(input: DeriveInput): DashboardMetrics;
+export declare function deriveMetrics(input: DeriveInput, nowMs: number): DashboardMetrics;

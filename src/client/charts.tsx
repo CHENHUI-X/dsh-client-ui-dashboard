@@ -78,16 +78,23 @@ export function DonutChart(props: {
     .map((d) => ({ color: d.color, label: d.label, value: Math.max(0, d.value) }))
     .filter((d) => d.value > 0);
   const n = raw.length;
-  // Enforce a minimum arc length, then scale the whole ring (arcs + gaps) to
-  // fit the circumference exactly — offsets are computed from the ACTUAL
-  // rendered lengths. `n` gaps are reserved (including the seam between the
-  // last and first arc), so no two segments ever touch, let alone overlap.
-  let lens = raw.map((d) => Math.max((d.value / Math.max(total, 1)) * C, minLen));
-  const available = Math.max(0, C - n * gap);
-  const sumLen = lens.reduce((s, l) => s + l, 0);
-  if (sumLen > available) {
-    const scale = available / sumLen;
-    lens = lens.map((l) => l * scale);
+  // A single segment renders a full ring — reserving an artificial gap for
+  // the "seam" would leave a visible notch that looks like a rendering bug.
+  let lens: number[];
+  if (n === 1) {
+    lens = [C];
+  } else {
+    // Enforce a minimum arc length, then scale the whole ring (arcs + gaps) to
+    // fit the circumference exactly — offsets are computed from the ACTUAL
+    // rendered lengths. `n` gaps are reserved (including the seam between the
+    // last and first arc), so no two segments ever touch, let alone overlap.
+    lens = raw.map((d) => Math.max((d.value / Math.max(total, 1)) * C, minLen));
+    const available = Math.max(0, C - n * gap);
+    const sumLen = lens.reduce((s, l) => s + l, 0);
+    if (sumLen > available) {
+      const scale = available / sumLen;
+      lens = lens.map((l) => l * scale);
+    }
   }
   const segments: { color: string; label: string; len: number; offset: number; value: number }[] = [];
   let acc = 0;
@@ -233,8 +240,10 @@ export function SeriesBars(props: {
   height?: number;
   valueFormatter?: (v: number) => string;
   emptyLabel?: string;
+  /** Show the max value as a top-right caption for at-a-glance reading. */
+  showMaxTag?: boolean;
 }): ReactNode {
-  const { series, height = 110, valueFormatter, emptyLabel } = props;
+  const { series, height = 110, valueFormatter, emptyLabel, showMaxTag = false } = props;
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...series.map((s) => Math.max(0, s.value)));
   const fmt = valueFormatter ?? ((v: number) => compactNumber(v));
@@ -246,7 +255,8 @@ export function SeriesBars(props: {
     );
   }
   return (
-    <div className="dshd-vbars" style={{ height }}>
+    <div className="dshd-vbars" style={{ height, position: "relative" }}>
+      {showMaxTag ? <div className="dshd-maxTag">{fmt(max)}</div> : null}
       {series.map((s, i) => {
         const v = Math.max(0, s.value);
         const pct = (v / max) * 100;
@@ -349,8 +359,17 @@ export function AreaChart(props: {
   color?: string;
   valueFormatter?: (v: number) => string;
   emptyLabel?: string;
+  /** Show the max value as a top-right caption for at-a-glance reading. */
+  showMaxTag?: boolean;
 }): ReactNode {
-  const { series, height = 96, color = "var(--dsw-alias-state-business-primary)", valueFormatter, emptyLabel } = props;
+  const {
+    series,
+    height = 96,
+    color = "var(--dsw-alias-state-business-primary)",
+    valueFormatter,
+    emptyLabel,
+    showMaxTag = false
+  } = props;
   const [hover, setHover] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const n = series.length;
@@ -386,10 +405,11 @@ export function AreaChart(props: {
     <div
       ref={ref}
       className="dshd-areaWrap"
-      style={{ height }}
+      style={{ height, position: "relative" }}
       onMouseMove={onMove}
       onMouseLeave={() => setHover(null)}
     >
+      {showMaxTag ? <div className="dshd-maxTag">{fmt(max)}</div> : null}
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" role="img">
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -414,13 +434,12 @@ export function AreaChart(props: {
             className="dshd-vtip"
             style={(() => {
               const pos = pts[hover].x / width;
-              const style: CSSProperties = {
+              return {
                 left: `${Math.min(88, Math.max(12, pos * 100))}%`,
-                top: `${(pts[hover].y / height) * 100}%`
-              };
-              if (pos < 0.33) style.transform = "translateX(-6%)";
-              else if (pos > 0.67) style.transform = "translateX(-94%)";
-              return style;
+                top: `${(pts[hover].y / height) * 100}%`,
+                // Horizontal flip only (vertical centering stays from the CSS rule).
+                ["--tip-dx" as string]: pos < 0.33 ? "-6%" : pos > 0.67 ? "-94%" : "-50%"
+              } as CSSProperties;
             })()}
           >
             {series[hover].label}: {fmt(series[hover].value)}
@@ -506,7 +525,7 @@ export function Sparkline({
 }
 
 /** Deterministic palette for per-model coloring (theme variables, no deps). */
-const MODEL_COLORS = [
+export const MODEL_COLORS = [
   "var(--dsw-alias-state-business-primary)",
   "var(--dsw-alias-state-success-primary)",
   "var(--dsw-alias-state-warn-primary)",
@@ -517,7 +536,8 @@ const MODEL_COLORS = [
   "var(--dsw-alias-label-tertiary)"
 ];
 
-const modelColorHash = (model: string): string => {
+/** Deterministic per-model color (shared by model bars and the model timeline). */
+export const modelColor = (model: string): string => {
   let h = 0;
   for (let i = 0; i < model.length; i++) h = (h * 31 + model.charCodeAt(i)) | 0;
   return MODEL_COLORS[Math.abs(h) % MODEL_COLORS.length]!;
@@ -534,7 +554,9 @@ export function ModelTimeline({
   emptyLabel,
   height = 44,
   maxPoints = 60,
-  note
+  note,
+  ariaLabel,
+  axisHint
 }: {
   data: readonly { seq: number; turn: number; model: string }[];
   switchSeqs: readonly number[];
@@ -545,6 +567,10 @@ export function ModelTimeline({
   maxPoints?: number;
   /** Optional caption when dots were trimmed. */
   note?: string;
+  /** Localized accessibility label for the svg. */
+  ariaLabel?: string;
+  /** Optional direction caption under the svg (e.g. "old → new"). */
+  axisHint?: string;
 }) {
   if (data.length === 0) {
     return (
@@ -558,7 +584,7 @@ export function ModelTimeline({
   const step = 7;
   const width = Math.max(60, trimmed.length * step);
   return (
-    <div className="dshd-modelTimeline" role="img" aria-label="model timeline">
+    <div className="dshd-modelTimeline" role="img" aria-label={ariaLabel ?? "model timeline"}>
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ display: "block" }}>
         {trimmed.map((d, i) => {
           const isSwitch = switchSeqs.includes(d.seq);
@@ -568,7 +594,7 @@ export function ModelTimeline({
               cx={i * step + step / 2}
               cy={height / 2}
               r={isSwitch ? 4 : 3}
-              fill={modelColorHash(d.model)}
+              fill={modelColor(d.model)}
               stroke={isSwitch ? "var(--dsw-alias-state-warn-primary)" : "none"}
               strokeWidth={isSwitch ? 1.2 : 0}
               opacity={isSwitch ? 1 : 0.72}
@@ -577,7 +603,7 @@ export function ModelTimeline({
               aria-label={`#${d.seq} · ${d.model}`}
               onClick={onPick === undefined ? undefined : () => onPick(d.seq)}
               onKeyDown={onPick === undefined ? undefined : (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(d.seq); } }}
-              style={{ cursor: onPick !== undefined ? "pointer" : undefined, outline: "none" }}
+              style={{ cursor: onPick !== undefined ? "pointer" : undefined }}
             >
               <title>{`#${d.seq} · ${d.model}`}</title>
             </circle>
@@ -585,10 +611,11 @@ export function ModelTimeline({
         })}
       </svg>
       {note !== undefined ? <div className="dshd-modelNote">{note}</div> : null}
+      {axisHint !== undefined ? <div className="dshd-axisHint">{axisHint}</div> : null}
       <div className="dshd-modelLegend">
         {models.map((m) => (
           <span key={m} className="dshd-modelLegendItem">
-            <i style={{ background: modelColorHash(m) }} />
+            <i style={{ background: modelColor(m) }} />
             {m}
           </span>
         ))}

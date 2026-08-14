@@ -54,6 +54,8 @@ export declare function SeriesBars(props: {
     height?: number;
     valueFormatter?: (v: number) => string;
     emptyLabel?: string;
+    /** Show the max value as a top-right caption for at-a-glance reading. */
+    showMaxTag?: boolean;
 }): ReactNode;
 /** One horizontal bar row (tool histogram / model split). */
 export interface RowDatum {
@@ -85,6 +87,8 @@ export declare function AreaChart(props: {
     color?: string;
     valueFormatter?: (v: number) => string;
     emptyLabel?: string;
+    /** Show the max value as a top-right caption for at-a-glance reading. */
+    showMaxTag?: boolean;
 }): ReactNode;
 /**
  * Semi-circular gauge (e.g. context occupancy). Colors by threshold:
@@ -103,11 +107,15 @@ export declare function Sparkline({ values, color, width, height }: {
     width?: number;
     height?: number;
 }): import("react").JSX.Element | null;
+/** Deterministic palette for per-model coloring (theme variables, no deps). */
+export declare const MODEL_COLORS: string[];
+/** Deterministic per-model color (shared by model bars and the model timeline). */
+export declare const modelColor: (model: string) => string;
 /**
  * Horizontal model timeline: one dot per request (oldest → newest), colored by
  * model; switch points get a ring. Clicking a dot jumps to the request.
  */
-export declare function ModelTimeline({ data, switchSeqs, onPick, emptyLabel, height, maxPoints, note }: {
+export declare function ModelTimeline({ data, switchSeqs, onPick, emptyLabel, height, maxPoints, note, ariaLabel, axisHint }: {
     data: readonly {
         seq: number;
         turn: number;
@@ -121,4 +129,8 @@ export declare function ModelTimeline({ data, switchSeqs, onPick, emptyLabel, he
     maxPoints?: number;
     /** Optional caption when dots were trimmed. */
     note?: string;
+    /** Localized accessibility label for the svg. */
+    ariaLabel?: string;
+    /** Optional direction caption under the svg (e.g. "old → new"). */
+    axisHint?: string;
 }): import("react").JSX.Element;

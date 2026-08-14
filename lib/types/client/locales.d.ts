@@ -25,6 +25,22 @@ export declare const zh: {
     readonly "section.models": "模型用量";
     readonly "section.turns": "轮次耗时";
     readonly "hint.turnDurations": "基于当前加载窗口(框架只加载最近一段日志);带 ~ 的轮次其结束事件在窗口外或仍在进行,耗时为近似值";
+    readonly "req.clearSearch": "清除搜索";
+    readonly "req.usage.cost": "估算成本";
+    readonly "unit.tokens": "tokens";
+    readonly "section.ttftByCache": "TTFT:命中 vs 未命中";
+    readonly "ttftCache.hit": "命中";
+    readonly "ttftCache.miss": "未命中";
+    readonly "hint.ttftByCache": "命中/未命中请求的平均首字延迟(样本为窗口内已完成请求)";
+    readonly "section.modelCost": "按模型成本";
+    readonly "hint.modelCost": "按各请求自身模型定价估算;缓存读取按未命中价计";
+    readonly "hint.turnTail": "仅显示最近 12 轮(窗口内还有更多轮次未列出)";
+    readonly "trend.rateFailed": "错误数";
+    readonly "trend.contextOcc": "上下文占用率";
+    readonly "hint.contextOccTrend": "每请求输入占上下文窗口的比例(压缩回落可见)";
+    readonly "health.loop": "循环";
+    readonly "health.noProgress": "无进展";
+    readonly "aria.modelTimeline": "模型切换时间线,每请求一个点,点击跳转到对应请求";
     readonly "hint.turnOpen": "该轮次结束事件不在当前窗口内(或仍在进行),耗时为窗口可见近似值";
     readonly "section.trend": "请求趋势";
     readonly "section.requests": "请求列表(点击行展开详情)";
@@ -151,6 +167,7 @@ export declare const zh: {
     readonly "trend.rateRequests": "请求密度";
     readonly "trend.rateTokens": "token 密度";
     readonly "trend.rateNote": "窗口内分桶";
+    readonly "trend.axisOldToNew": "时间方向:旧 → 新(每个圆点 = 一次请求)";
     readonly "trend.windowTotal": "合计基于最近 60 条请求(当前窗口)";
     readonly "trend.windowTotalAll": "当前窗口内全部请求的合计";
     readonly "trend.ttftAvgNote": "均值基于窗口内可观测样本;X 轴为请求序号,与其他趋势图对齐";
@@ -167,7 +184,7 @@ export declare const zh: {
     readonly "hint.loop": "连续相同调用,涉及请求 seq:";
     readonly "hint.noProgress": "低产出高调用";
     readonly "trend.toolStorm": "工具调用密度";
-    readonly "hint.modelTimeline": "每个请求一个点,按模型着色;带琥珀环 = 模型切换,点击跳转";
+    readonly "hint.modelTimeline": "圆点 = 一次请求,颜色 = 模型;琥珀环 = 模型切换;点击圆点跳转该请求";
     readonly "section.effort": "推理强度分布";
     readonly "section.commands": "命令明细";
     readonly "section.summary": "摘要";
@@ -188,7 +205,7 @@ export declare const zh: {
     readonly "view.error": "按错误";
     readonly "stat.requests.ok": "成功请求";
     readonly "req.export": "导出 JSON";
-    readonly "req.exportHint": "导出当前筛选下的请求明细(JSON)";
+    readonly "req.exportHint": "导出当前视图的请求明细(含筛选与搜索,JSON)";
     readonly "req.filter.running": "进行中";
     readonly "req.filter.complete": "完成";
     readonly "req.filter.error": "失败";

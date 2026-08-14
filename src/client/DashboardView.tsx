@@ -30,7 +30,8 @@ import {
   StackedBar,
   compactNumber,
   exactNumber,
-  formatMs
+  formatMs,
+  modelColor
 } from "./charts";
 import type { ChartDatum, RowDatum, SeriesDatum } from "./charts";
 
@@ -48,28 +49,33 @@ export type DashboardViewProps = ConvViewProps &
     actions?: SharedChatActions;
   };
 
-/** Categorical palette: deterministic, distinct hues in every theme. The two
- *  blended slots use color-mix (widely supported in the Electron shell) so
- *  the palette never collapses onto label/grey tones or repeats a state color
- *  when the magenta token is absent. */
-const PALETTE: readonly string[] = [
+/** Categorical palette for non-model series (tool names, commands): deterministic,
+ *  distinct hues in every theme. Models use the shared `modelColor` hash so the
+ *  model bars and the model timeline never disagree on a color. */
+const TOOL_COLORS: readonly string[] = [
+  "var(--dsw-alias-state-warn-primary)",
   "var(--dsw-alias-state-business-primary)",
   "var(--dsw-alias-state-success-primary)",
   "var(--dsw-alias-state-error-primary)",
-  "var(--dsw-alias-state-warn-primary)",
-  "color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-state-success-primary) 45%)",
-  "color-mix(in srgb, var(--dsw-alias-state-error-primary) 60%, var(--dsw-alias-state-warn-primary) 40%)",
-  "color-mix(in srgb, var(--dsw-alias-state-success-primary) 60%, var(--dsw-alias-state-warn-primary) 40%)",
-  "color-mix(in srgb, var(--dsw-alias-state-business-primary) 65%, var(--dsw-alias-state-error-primary) 35%)"
+  "color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-state-warn-primary) 45%)",
+  "color-mix(in srgb, var(--dsw-alias-state-error-primary) 60%, var(--dsw-alias-state-warn-primary) 40%)"
 ];
 
 /** Small "?" anchor that explains a metric on hover. */
 function Hint(props: { label: string }): JSX.Element {
   return (
     <Tooltip label={props.label} side="top" delayMs={450} maxWidth={260}>
-      <span className="dshd-hint" tabIndex={0}>?</span>
+      <span className="dshd-hint" role="button" tabIndex={0} aria-label={props.label}>?</span>
     </Tooltip>
   );
+}
+
+/** Adaptive USD formatting: fewer decimals for larger amounts, never "$0.0000". */
+function fmtCost(v: number): string {
+  if (v <= 0) return "$0";
+  if (v >= 1) return `$${v.toFixed(2)}`;
+  if (v >= 0.01) return `$${v.toFixed(4)}`;
+  return "<$0.0001";
 }
 
 function StatCard(props: {
@@ -154,7 +160,7 @@ function RequestDetailPanel(props: {
         <span className="dshd-chip">{detail.durationMs === null ? t("unknown") : formatMs(detail.durationMs)}</span>
         {startedLabel !== null ? <span className="dshd-chip" title={t("req.startedAt")}>{startedLabel}</span> : null}
         {onJump !== undefined ? (
-          <button type="button" className="dshd-jump" onClick={onJump}>{t("req.jumpTrajectory")} ↗</button>
+          <button type="button" className="dshd-jumpText" onClick={onJump}>{t("req.jumpTrajectory")} ↗</button>
         ) : null}
       </div>
 
@@ -206,6 +212,10 @@ function RequestDetailPanel(props: {
           <span className="dshd-kvKey">{t("req.usage.reasoning")}</span>
           <span className="dshd-kvValue">{exactNumber(detail.reasoningTokens)}</span>
         </div>
+        <div className="dshd-kvItem">
+          <span className="dshd-kvKey" title={t("hint.cost")}>{t("req.usage.cost")}</span>
+          <span className="dshd-kvValue">{fmtCost(detail.costUsd)}</span>
+        </div>
       </div>
 
       <div>
@@ -255,12 +265,15 @@ function TrendSection(props: {
   const canJump = actions !== undefined;
   const colCount = 8 + (canJump ? 1 : 0);
 
-  // Download the current window's requests as JSON (respects the active filter).
+  // Download the current view's requests as JSON — respects filter, search and
+  // the active view (exported flat, with the view/search written into the payload).
   const exportJson = (): void => {
     const payload = {
       exportedAt: new Date().toISOString(),
       filter,
-      requests: filtered.map((s) => {
+      search: search.trim(),
+      view,
+      requests: searched.map((s) => {
         const d = metrics.details.find((x) => x.seq === s.seq);
         return {
           seq: s.seq,
@@ -278,6 +291,7 @@ function TrendSection(props: {
           startedAt: s.startedAt,
           durationMs: s.durationMs,
           error: s.error,
+          costUsd: d?.costUsd ?? 0,
           reasoningEffort: d?.reasoningEffort ?? null,
           temperature: d?.temperature ?? null,
           retry: d?.retry ?? 0,
@@ -289,7 +303,7 @@ function TrendSection(props: {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `dashboard-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+    a.download = `dashboard-${view}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -427,6 +441,16 @@ function TrendSection(props: {
       .sort((a, b) => b.items.length - a.items.length);
   })();
 
+  // Badge counts for the filter pills and the view tabs (at-a-glance spread).
+  const statusCounts = { all: metrics.series.length, running: 0, complete: 0, error: 0 };
+  for (const s of metrics.series) statusCounts[s.status] += 1;
+  const viewCounts = {
+    table: total,
+    turn: new Set(searched.map((s) => s.turn)).size,
+    model: new Set(searched.map((s) => s.model ?? "")).size,
+    error: new Set(searched.filter((s) => s.status === "error").map((s) => s.error ?? "")).size
+  };
+
   // Detect new requests arriving while the user is off the first page.
   useEffect(() => {
     if (total > prevLen.current && safePage > 0) setNewArrived(true);
@@ -513,6 +537,27 @@ function TrendSection(props: {
     value: b.inputTokens + b.outputTokens,
     color: CHART_COLORS.input
   }));
+  // Error-rate trend: failed requests per bucket (S4).
+  const rateFailBars: SeriesDatum[] = metrics.throughput.map((b) => ({
+    label: bucketTime(b.bucketMs),
+    value: b.failed,
+    color: CHART_COLORS.output
+  }));
+  const totalFailed = metrics.series.filter((s) => s.status === "error").length;
+  // Context occupancy over the window: per-request input ÷ context window (S3).
+  const contextOccBars: SeriesDatum[] = metrics.contextTrend
+    .filter((c) => c.pct !== null)
+    .map((c) => ({
+      label: `${t("trend.request")}${c.seq}`,
+      value: c.pct as number,
+      color: CHART_COLORS.cacheWrite
+    }));
+  const occNowPct =
+    metrics.pressure?.projectedTokens !== undefined &&
+    metrics.pressure.contextWindow !== undefined &&
+    metrics.pressure.contextWindow > 0
+      ? Math.min(100, Math.round((metrics.pressure.projectedTokens / metrics.pressure.contextWindow) * 100))
+      : null;
   // Compaction turns for the sawtooth annotation.
   const compactionTurns = [...new Set(metrics.compactionEffect.map((e) => e.turn))].sort((a, b) => a - b);
   // Reasoning share of output per request (0% when no reasoning reported).
@@ -543,6 +588,7 @@ function TrendSection(props: {
             color={CHART_COLORS.cacheRead}
             valueFormatter={(v) => `${v}%`}
             emptyLabel={t("empty.requests")}
+            showMaxTag
           />
           <div className="dshd-axisHint">{t("trend.newestRight")}{scopeNote}</div>
         </div>
@@ -552,7 +598,7 @@ function TrendSection(props: {
             {t("trend.input")}
             <span className="dshd-seriesTotal" title={windowTitle}>{exactNumber(totalInput)}</span>
           </div>
-          <SeriesBars series={tokenBars} height={76} emptyLabel={t("empty.requests")} />
+          <SeriesBars series={tokenBars} height={76} emptyLabel={t("empty.requests")} showMaxTag />
           <div className="dshd-axisHint">{t("trend.newestRight")}{scopeNote}</div>
         </div>
         <div className="dshd-seriesCol">
@@ -561,7 +607,7 @@ function TrendSection(props: {
             {t("trend.output")}
             <span className="dshd-seriesTotal" title={windowTitle}>{exactNumber(totalOutput)}</span>
           </div>
-          <SeriesBars series={outputBars} height={76} emptyLabel={t("empty.requests")} />
+          <SeriesBars series={outputBars} height={76} emptyLabel={t("empty.requests")} showMaxTag />
           <div className="dshd-axisHint">{t("trend.newestRight")}{scopeNote}</div>
         </div>
         <div className="dshd-seriesCol">
@@ -578,7 +624,7 @@ function TrendSection(props: {
             {t("trend.duration")}
             <span className="dshd-seriesTotal" title={windowTitle}>{formatMs(metrics.totalDurationMs)}</span>
           </div>
-          <SeriesBars series={durationBars} height={76} valueFormatter={(v) => formatMs(v)} emptyLabel={t("empty.requests")} />
+          <SeriesBars series={durationBars} height={76} valueFormatter={(v) => formatMs(v)} emptyLabel={t("empty.requests")} showMaxTag />
           <div className="dshd-axisHint">{t("trend.newestRight")}{scopeNote}</div>
         </div>
       </div>
@@ -596,6 +642,7 @@ function TrendSection(props: {
             color={CHART_COLORS.reasoning}
             valueFormatter={(v) => formatMs(v)}
             emptyLabel={t("empty.requests")}
+            showMaxTag
           />
           <div className="dshd-axisHint">
             {t("trend.newestRight")}{scopeNote}
@@ -619,7 +666,7 @@ function TrendSection(props: {
               </span>
             ) : null}
           </div>
-          <AreaChart series={turnInputBars} height={76} color={CHART_COLORS.input} valueFormatter={(v) => exactNumber(v)} emptyLabel={t("empty.requests")} />
+          <AreaChart series={turnInputBars} height={76} color={CHART_COLORS.input} valueFormatter={(v) => exactNumber(v)} emptyLabel={t("empty.requests")} showMaxTag />
           <div className="dshd-axisHint">
             {t("trend.newestRight")}{scopeNote}
             {compactionTurns.length > 0 ? (
@@ -638,6 +685,7 @@ function TrendSection(props: {
             color={CHART_COLORS.reasoning}
             valueFormatter={(v) => `${v}%`}
             emptyLabel={t("empty.requests")}
+            showMaxTag
           />
           <div className="dshd-axisHint">{t("trend.newestRight")}{scopeNote}</div>
         </div>
@@ -647,7 +695,7 @@ function TrendSection(props: {
             {t("trend.cacheWrite")}
             <span className="dshd-seriesTotal" title={windowTitle}>{exactNumber(totalCacheWrite)}</span>
           </div>
-          <SeriesBars series={cacheWriteBars} height={76} emptyLabel={t("empty.requests")} />
+          <SeriesBars series={cacheWriteBars} height={76} emptyLabel={t("empty.requests")} showMaxTag />
           <div className="dshd-axisHint">{t("trend.newestRight")}{scopeNote}</div>
         </div>
       </div>
@@ -659,7 +707,7 @@ function TrendSection(props: {
             <span style={{ width: 9, height: 9, borderRadius: 2.5, background: CHART_COLORS.llm, display: "inline-block" }} />
             {t("trend.rateRequests")}
           </div>
-          <SeriesBars series={rateReqBars} height={60} emptyLabel={t("empty.requests")} />
+          <SeriesBars series={rateReqBars} height={60} emptyLabel={t("empty.requests")} showMaxTag />
           <div className="dshd-axisHint">{t("trend.rateNote")}</div>
         </div>
         <div className="dshd-seriesCol">
@@ -667,8 +715,40 @@ function TrendSection(props: {
             <span style={{ width: 9, height: 9, borderRadius: 2.5, background: CHART_COLORS.input, display: "inline-block" }} />
             {t("trend.rateTokens")}
           </div>
-          <SeriesBars series={rateTokenBars} height={60} emptyLabel={t("empty.requests")} />
+          <SeriesBars series={rateTokenBars} height={60} emptyLabel={t("empty.requests")} showMaxTag />
           <div className="dshd-axisHint">{t("trend.rateNote")}</div>
+        </div>
+        <div className="dshd-seriesCol">
+          <div className="dshd-seriesLabel">
+            <span style={{ width: 9, height: 9, borderRadius: 2.5, background: CHART_COLORS.output, display: "inline-block" }} />
+            {t("trend.rateFailed")}
+            <span className="dshd-seriesTotal">{exactNumber(totalFailed)}</span>
+          </div>
+          <AreaChart
+            series={rateFailBars}
+            height={60}
+            color={CHART_COLORS.output}
+            valueFormatter={(v) => exactNumber(v)}
+            emptyLabel={t("empty.requests")}
+            showMaxTag
+          />
+          <div className="dshd-axisHint">{t("trend.rateNote")}</div>
+        </div>
+        <div className="dshd-seriesCol">
+          <div className="dshd-seriesLabel">
+            <span style={{ width: 9, height: 9, borderRadius: 2.5, background: CHART_COLORS.cacheWrite, display: "inline-block" }} />
+            {t("trend.contextOcc")}
+            {occNowPct !== null ? <span className="dshd-seriesTotal">{occNowPct}%</span> : null}
+          </div>
+          <AreaChart
+            series={contextOccBars}
+            height={60}
+            color={CHART_COLORS.cacheWrite}
+            valueFormatter={(v) => `${v}%`}
+            emptyLabel={t("empty.requests")}
+            showMaxTag
+          />
+          <div className="dshd-axisHint">{t("hint.contextOccTrend")}</div>
         </div>
       </div>
 
@@ -687,6 +767,7 @@ function TrendSection(props: {
             }}
           >
             {t(`view.${v}`)}
+            <span className="dshd-badge">{viewCounts[v]}</span>
           </button>
         ))}
       </div>
@@ -705,6 +786,7 @@ function TrendSection(props: {
             }}
           >
             {t(`req.filter.${f}`)}
+            <span className="dshd-badge">{statusCounts[f]}</span>
           </button>
         ))}
         <span className="dshd-spacer" />
@@ -746,7 +828,21 @@ function TrendSection(props: {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={colCount} className="dshd-tableEmpty">
-                  {filter !== "all" ? (
+                  {search.trim().length > 0 ? (
+                    <>
+                      {t("empty.search")}{" "}
+                      <button
+                        type="button"
+                        className="dshd-clearFilter"
+                        onClick={() => {
+                          setSearch("");
+                          setPage(0);
+                        }}
+                      >
+                        {t("req.clearSearch")}
+                      </button>
+                    </>
+                  ) : filter !== "all" ? (
                     <>
                       {t("empty.requestsFiltered")}{" "}
                       <button
@@ -839,7 +935,8 @@ function TrendSection(props: {
         /* Grouped views: collapsible group headers + aggregated stats */
         <div className="dshd-groups">
           {groups.map((g) => {
-            const isCollapsed = collapsed[g.key] === true;
+            const gkey = `${view}:${g.key}`;
+            const isCollapsed = collapsed[gkey] === true;
             let inSum = 0;
             let outSum = 0;
             let durSum = 0;
@@ -860,7 +957,7 @@ function TrendSection(props: {
                   type="button"
                   className="dshd-groupHead"
                   aria-expanded={!isCollapsed}
-                  onClick={() => toggleCollapsed(g.key)}
+                  onClick={() => toggleCollapsed(gkey)}
                 >
                   <span className="dshd-chevron" data-open={isCollapsed ? undefined : true}>▸</span>
                   <span className="dshd-groupName">{g.label}</span>
@@ -873,6 +970,19 @@ function TrendSection(props: {
                 {!isCollapsed ? (
                   <div className="dshd-groupBody">
                     <table className="dshd-table" aria-label={g.label}>
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>#</th>
+                          <th>{t("req.turnStep")}</th>
+                          <th>{t("req.model")}</th>
+                          <th>{t("trend.input")}</th>
+                          <th>{t("trend.output")}</th>
+                          <th>{t("trend.duration")}</th>
+                          <th>{t("req.status")}</th>
+                          {canJump ? <th></th> : null}
+                        </tr>
+                      </thead>
                       <tbody>{g.items.map(renderRow)}</tbody>
                     </table>
                   </div>
@@ -953,16 +1063,19 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   const metrics = useMemo(
     () =>
-      deriveMetrics({
-        running,
-        snapshot: { turnTimings },
-        nodes,
-        requests: trajectory?.requests ?? [],
-        tokenUsage,
-        stats,
-        context,
-        pressure
-      }),
+      deriveMetrics(
+        {
+          running,
+          snapshot: { turnTimings },
+          nodes,
+          requests: trajectory?.requests ?? [],
+          tokenUsage,
+          stats,
+          context,
+          pressure
+        },
+        Date.now()
+      ),
     [running, nodes, turnTimings, trajectory, tokenUsage, stats, context, pressure]
   );
 
@@ -1068,17 +1181,17 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
   const toolRows = metrics.toolHistogram.slice(0, 8).map((h, i) => ({
     label: h.name,
     value: h.count,
-    color: PALETTE[i % PALETTE.length] ?? CHART_COLORS.llm,
+    color: TOOL_COLORS[i % TOOL_COLORS.length] ?? CHART_COLORS.llm,
     errorMark: h.errorCount > 0,
     sub: h.errorCount > 0 ? `${h.errorCount}/${h.count} (${Math.round((h.errorCount / Math.max(1, h.count)) * 100)}%)` : undefined
   }));
 
-  const modelRows = metrics.modelSplit.map((m, i) => ({
+  const modelRows = metrics.modelSplit.map((m) => ({
     label: m.model,
     value: m.inputTokens + m.outputTokens,
-    color: PALETTE[i % PALETTE.length] ?? CHART_COLORS.llm,
+    color: modelColor(m.model),
     title: `${m.provider} · avg duration ${m.avgDurationMs === null ? t("unknown") : formatMs(m.avgDurationMs)} · avg TTFT ${m.avgTtftMs === null ? t("unknown") : formatMs(m.avgTtftMs)} · ${m.errorCount} ${t("req.error")}`,
-    sub: `${m.requests} ${t("models.requests")} · ${compactNumber(m.inputTokens)}→${compactNumber(m.outputTokens)}${m.avgDurationMs !== null ? ` · ${formatMs(m.avgDurationMs)}` : ""}${m.errorCount > 0 ? ` · ${m.errorCount}⚠` : ""}`
+    sub: `${m.requests} ${t("models.requests")} · ${compactNumber(m.inputTokens)}→${compactNumber(m.outputTokens)} · ${fmtCost(m.costUsd)}${m.avgDurationMs !== null ? ` · ${formatMs(m.avgDurationMs)}` : ""}${m.errorCount > 0 ? ` · ${m.errorCount}⚠` : ""}`
   }));
 
   const errorRows: RowDatum[] = [
@@ -1167,7 +1280,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         ))}
       </div>
       {running ? (
-        <div className="dshd-streamRow" role="status">
+        <div className="dshd-streamRow">
           <span className="dshd-streamDot" />
           <span className="dshd-streamText">
             {t("status.streaming")}
@@ -1211,14 +1324,14 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             label={t("stat.compactionRecovered")}
             value={metrics.compactionRecoveredTokens === null ? t("unknown") : compactNumber(metrics.compactionRecoveredTokens)}
             hint={t("hint.compactionRecovered")}
-            sub={metrics.compactionRequests > 0 ? `${exactNumber(metrics.compactionRequests)} ${t("stat.compactions")}${metrics.compactionRecoveredItems === null ? "" : ` · ${exactNumber(metrics.compactionRecoveredItems)} ${t("stat.compactionItems")}`}` : undefined}
+            sub={metrics.compactionRequests > 0 ? `${compactNumber(metrics.compactionRequests)} ${t("stat.compactions")}${metrics.compactionRecoveredItems === null ? "" : ` · ${compactNumber(metrics.compactionRecoveredItems)} ${t("stat.compactionItems")}`}` : undefined}
           />
           <StatCard label={t("stat.modelSwitches")} value={exactNumber(metrics.modelSwitchCount)} hint={t("hint.modelSwitches")} />
           <StatCard
             label={t("stat.cost")}
-            value={metrics.costEstimateUsd.total <= 0 ? "—" : `$${metrics.costEstimateUsd.total.toFixed(4)}`}
+            value={metrics.costEstimateUsd.total <= 0 ? "—" : fmtCost(metrics.costEstimateUsd.total)}
             hint={t("hint.cost")}
-            sub={metrics.costEstimateUsd.cacheSavings > 0 ? `${t("stat.costSavings")} $${metrics.costEstimateUsd.cacheSavings.toFixed(4)}` : undefined}
+            sub={metrics.costEstimateUsd.cacheSavings > 0 ? `${t("stat.costSavings")} ${fmtCost(metrics.costEstimateUsd.cacheSavings)}` : undefined}
           />
           <StatCard
             label={t("stat.totalDuration")}
@@ -1236,7 +1349,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             label={t("stat.decodeSpeed")}
             value={metrics.decodeTokensPerSec === null ? t("unknown") : `${Math.round(metrics.decodeTokensPerSec)} ${t("unit.tps")}`}
             hint={t("hint.decodeSpeed")}
-            sub={`${exactNumber(metrics.decodeTokens)} ${t("trend.output")} / ${formatMs(metrics.decodeMs)}`}
+            sub={`${compactNumber(metrics.decodeTokens)} ${t("trend.output")} / ${formatMs(metrics.decodeMs)}`}
           />
         </div>
       </section>
@@ -1249,15 +1362,15 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         </div>
         <div className="dshd-stats">
           <StatCard label={t("stat.inputTokens")} value={exactNumber(metrics.inputTokens)} hint={t("hint.inputTokens")} tone="accent" spark={{ values: sparkInput, color: CHART_COLORS.input, title: t("trend.newestRight") }} />
-          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} sub={metrics.reasoningTokens > 0 ? `${t("tokens.reasoning")} ${exactNumber(metrics.reasoningTokens)}` : undefined} spark={{ values: sparkOutput, color: CHART_COLORS.output, title: t("trend.newestRight") }} />
+          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} sub={metrics.reasoningTokens > 0 ? `${t("tokens.reasoning")} ${compactNumber(metrics.reasoningTokens)}` : undefined} spark={{ values: sparkOutput, color: CHART_COLORS.output, title: t("trend.newestRight") }} />
           <StatCard
             label={t("stat.reasoningTokens")}
             value={exactNumber(metrics.reasoningTokens)}
             hint={t("hint.reasoningTokens")}
-            sub={metrics.outputTokens > 0 ? `${t("stat.reasoningShare")} ${Math.round((metrics.reasoningTokens / metrics.outputTokens) * 100)}%` : undefined}
+            sub={metrics.windowOutputTokens > 0 ? `${t("stat.reasoningShare")} ${Math.round((metrics.reasoningTokens / metrics.windowOutputTokens) * 100)}% (${t("role.windowNote")})` : undefined}
             tone={metrics.reasoningTokens > 0 ? "accent" : undefined}
           />
-          <StatCard label={t("stat.cacheHitRate")} value={metrics.cacheHitPercent === null ? t("unknown") : `${metrics.cacheHitPercent}${t("unit.percent")}`} hint={t("hint.cacheHitRate")} tone={metrics.cacheHitPercent !== null && metrics.cacheHitPercent >= 60 ? "good" : metrics.cacheHitPercent !== null && metrics.cacheHitPercent > 0 ? "accent" : undefined} sub={metrics.cacheHitPercent === null ? undefined : `${t("stat.cacheRead")} ${exactNumber(metrics.cacheReadTokens)} / ${t("stat.inputTokens")} ${exactNumber(metrics.inputTokens)}`} spark={{ values: sparkHit, color: CHART_COLORS.cacheRead, title: t("trend.newestRight") }} />
+          <StatCard label={t("stat.cacheHitRate")} value={metrics.cacheHitPercent === null ? t("unknown") : `${metrics.cacheHitPercent}${t("unit.percent")}`} hint={t("hint.cacheHitRate")} tone={metrics.cacheHitPercent !== null && metrics.cacheHitPercent >= 60 ? "good" : metrics.cacheHitPercent !== null && metrics.cacheHitPercent > 0 ? "accent" : undefined} sub={metrics.cacheHitPercent === null ? undefined : `${t("stat.cacheRead")} ${compactNumber(metrics.cacheReadTokens)} / ${t("stat.inputTokens")} ${compactNumber(metrics.inputTokens)}`} spark={{ values: sparkHit, color: CHART_COLORS.cacheRead, title: t("trend.newestRight") }} />
         </div>
         <StackedBar data={tokenData} valueFormatter={(v) => exactNumber(v)} height={20} totalLabel={t("total")} />
       </section>
@@ -1353,6 +1466,26 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             height={20}
             totalLabel={t("total")}
           />
+          {metrics.ttftByCache.hitN + metrics.ttftByCache.missN > 0 ? (
+            <div className="dshd-col">
+              <div className="dshd-subTitle">{t("section.ttftByCache")}</div>
+              <div className="dshd-kv">
+                <div className="dshd-kvItem">
+                  <span className="dshd-kvKey" style={{ color: "var(--dsw-alias-state-success-primary)" }}>
+                    {t("ttftCache.hit")} ({metrics.ttftByCache.hitN})
+                  </span>
+                  <span className="dshd-kvValue">{metrics.ttftByCache.hitAvgMs === null ? t("unknown") : formatMs(metrics.ttftByCache.hitAvgMs)}</span>
+                </div>
+                <div className="dshd-kvItem">
+                  <span className="dshd-kvKey" style={{ color: "var(--dsw-alias-state-warn-primary)" }}>
+                    {t("ttftCache.miss")} ({metrics.ttftByCache.missN})
+                  </span>
+                  <span className="dshd-kvValue">{metrics.ttftByCache.missAvgMs === null ? t("unknown") : formatMs(metrics.ttftByCache.missAvgMs)}</span>
+                </div>
+              </div>
+              <div className="dshd-muted" style={{ fontSize: 10.5 }}>{t("hint.ttftByCache")}</div>
+            </div>
+          ) : null}
           {metrics.durationStats.sampleCount > 0 ? (
             <div className="dshd-col">
               <div className="dshd-subTitle">{t("section.durationDist")}</div>
@@ -1374,7 +1507,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
                         <div
                           className="dshd-histBar"
                           style={{
-                            height: `${Math.max((b.count / maxCount) * 100, b.count > 0 ? 8 : 2)}%`,
+                            height: `${b.count > 0 ? Math.max((b.count / maxCount) * 100, 8) : 0}%`,
                             background: CHART_COLORS.reasoning
                           }}
                         />
@@ -1408,6 +1541,9 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
               ))}
             </div>
           )}
+          {turnTimings.size > metrics.turnDurations.length ? (
+            <div className="dshd-muted" style={{ fontSize: 11, marginTop: 6 }}>{t("hint.turnTail")}</div>
+          ) : null}
         </section>
 
         {/* Tool histogram */}
@@ -1427,7 +1563,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
                 data={metrics.toolDurationTop.slice(0, 5).map((r, i) => ({
                   label: r.name,
                   value: r.totalMs,
-                  color: PALETTE[i % PALETTE.length] ?? CHART_COLORS.llm,
+                  color: TOOL_COLORS[i % TOOL_COLORS.length] ?? CHART_COLORS.llm,
                   sub: `${t("tools.avgDuration")} ${formatMs(r.avgMs)} · ${r.calls}`
                 }))}
                 valueFormatter={(v) => formatMs(v)}
@@ -1443,6 +1579,17 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             <span className="dshd-cardHint">{t("hint.modelTimeline")}</span>
           </div>
           <HorizontalBars data={modelRows} valueFormatter={(v) => exactNumber(v)} />
+          {metrics.modelSplit.length > 1 ? (
+            <div style={{ marginTop: 8 }}>
+              <StackedBar
+                data={metrics.modelSplit.map((m) => ({ label: m.model, value: m.costUsd, color: modelColor(m.model) }))}
+                valueFormatter={(v) => fmtCost(v)}
+                height={20}
+                totalLabel={t("section.modelCost")}
+              />
+              <div className="dshd-muted" style={{ fontSize: 10.5 }}>{t("hint.modelCost")}</div>
+            </div>
+          ) : null}
           {metrics.modelTimeline.length > 0 ? (
             <div style={{ marginTop: 10 }}>
               <ModelTimeline
@@ -1451,6 +1598,8 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
                 emptyLabel={t("empty.requests")}
                 onPick={actions !== undefined ? (seq) => jumpTo(seq) : undefined}
                 note={metrics.modelTimeline.length > 60 ? `${t("trend.scopeNote")} 60 ${t("pager.items")}` : undefined}
+                axisHint={t("trend.axisOldToNew")}
+                ariaLabel={t("aria.modelTimeline")}
               />
             </div>
           ) : null}
@@ -1560,15 +1709,17 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             <div className="dshd-col">
               {metrics.loops.map((l) => (
                 <div key={`${l.name}${l.count}`} className="dshd-errRow" title={`${t("hint.loop")} ${l.seqs.join(", ")}`}>
-                  <span className="dshd-errMsg">🔁 {l.name}</span>
+                  <span className="dshd-healthTag" data-k="loop">{t("health.loop")}</span>
+                  <span className="dshd-errMsg">{l.name}</span>
                   <span className="dshd-errCount">×{l.count}</span>
                 </div>
               ))}
               {metrics.noProgress.map((p) => (
                 <div key={p.seq} className="dshd-errRow" title={`${t("req.seq")} ${p.seq}`}>
-                  <span className="dshd-errMsg">🐢 {t("hint.noProgress")}</span>
+                  <span className="dshd-healthTag" data-k="noProgress">{t("health.noProgress")}</span>
+                  <span className="dshd-errMsg">{t("hint.noProgress")}</span>
                   <span className="dshd-errCount">
-                    {t("turns.label")}{p.turn} · {p.outputTokens} {t("unit.char")} · {p.toolCalls} {t("req.toolCalls")}
+                    {t("turns.label")}{p.turn} · {p.outputTokens} {t("unit.tokens")} · {p.toolCalls} {t("req.toolCalls")}
                   </span>
                 </div>
               ))}
@@ -1584,6 +1735,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
                   }))}
                   height={54}
                   emptyLabel={t("empty.requests")}
+                  showMaxTag
                 />
               </div>
             ) : null}
