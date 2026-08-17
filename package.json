@@ -1,6 +1,6 @@
 {
   "name": "dsh-client-ui-dashboard",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "DSH web plugin: a real-time dashboard tab for the current conversation — token usage, cache hit rate, message-role distribution, and timing breakdowns, visualized.",
   "license": "MIT",
   "contributors": [
@@ -56,13 +56,20 @@
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
     "react": "^18.2.0"
   },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
     "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-goal": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-projection": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-session-stats": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-token-meter": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tool-todo": "^0.1.0-rc.6",
     "@types/react": "~18.3.1",
     "esbuild": "^0.25.0",
     "typescript": "~5.7.2"

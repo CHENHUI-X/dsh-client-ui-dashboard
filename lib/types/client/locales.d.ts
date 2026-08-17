@@ -1,5 +1,7 @@
 /** Locale namespace owned by this plugin. */
 export declare const NS = "dashboard";
+/** The plugin's locale dictionary key union (drives the `t` seat typing). */
+export type DashboardLocaleKey = keyof typeof zh;
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export declare const zh: {
     readonly "view.dashboard": "看板";
@@ -234,6 +236,52 @@ export declare const zh: {
     readonly "context.pressureMissing": "provider 未上报压力数据,暂无占用估算";
     readonly "hint.modelSwitches": "会话过程中模型切换的次数(相邻请求模型不同)。";
     readonly "hint.compactionRecovered": "压缩替模型省掉的 tokens(provider 上报的 shadowed 值,缺失时留空)。";
+    readonly "board.section": "活动看板";
+    readonly "hud.status": "状态";
+    readonly "hud.status.running": "运行中";
+    readonly "hud.status.idle": "空闲";
+    readonly "hud.tool": "工具";
+    readonly "hud.goal": "目标";
+    readonly "hud.todos": "任务";
+    readonly "hud.todos.value": "{n} 个进行中";
+    readonly "hud.subagents": "子代理";
+    readonly "hud.subagents.value": "{n} 个运行中";
+    readonly "hud.workflow": "工作流";
+    readonly "hud.workflow.value": "{n} 个运行中";
+    readonly "hud.schedule": "提醒";
+    readonly "board.col.inProgress": "进行中";
+    readonly "board.col.planned": "计划";
+    readonly "board.col.blocked": "阻塞";
+    readonly "board.col.done": "已完成";
+    readonly "board.goal.phase.active": "进行中";
+    readonly "board.goal.phase.paused": "已暂停";
+    readonly "board.goal.phase.complete": "已完成";
+    readonly "board.goal.phase.blocked": "已阻塞";
+    readonly "board.goal.phase.cleared": "已清除";
+    readonly "board.goal.rounds": "第 {n}/{m} 轮";
+    readonly "board.goal.blockedReason": "原因: {message}";
+    readonly "board.todo.status.pending": "待办";
+    readonly "board.todo.status.inProgress": "进行中";
+    readonly "board.todo.status.completed": "已完成";
+    readonly "board.workflow.running": "运行中";
+    readonly "board.workflow.members": "{n} 个成员";
+    readonly "board.workflow.member.outcome.running": "运行中";
+    readonly "board.workflow.member.outcome.completed": "完成";
+    readonly "board.workflow.member.outcome.failed": "失败";
+    readonly "board.workflow.member.outcome.cancelled": "已取消";
+    readonly "board.workflow.stop.completed": "已完成";
+    readonly "board.workflow.stop.cancelled": "已取消";
+    readonly "board.workflow.stop.error": "出错";
+    readonly "board.subagents.running": "运行中";
+    readonly "board.subagents.inactive": "空闲";
+    readonly "board.subagent.mode.oneShot": "一次性";
+    readonly "board.subagent.mode.continuable": "可继续";
+    readonly "board.schedule.overdue": "已到期";
+    readonly "board.schedule.dispatched": "已触发";
+    readonly "board.schedule.due": "于 {time}";
+    readonly "board.schedule.every": "每 {s}s";
+    readonly "board.empty": "会话还没有活动 —— 发起目标、任务、工作流或提醒后,它们会自动出现在这里。";
+    readonly "board.hint": "看板由会话日志自动驱动:goal / todo / workflow / schedule / subagent 事件自动上板,无需手动维护。";
 };
 /** English dictionary, checked complete against the zh key set. */
 export declare const en: Record<keyof typeof zh, string>;

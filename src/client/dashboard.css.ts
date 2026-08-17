@@ -78,6 +78,15 @@ const css = String.raw`
 .dshd-stat{background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:4px;min-width:0;position:relative;transition:border-color .18s,transform .2s ease,box-shadow .2s ease;animation:dshdEnter .32s cubic-bezier(.22,.61,.36,1) both}
 .dshd-stat:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,var(--dsw-alias-border-l1));box-shadow:var(--dsw-shadow-lv2,0 6px 16px rgb(0 0 0 / .24))}
 .dshd-stat:hover .dshd-statValue{filter:brightness(1.12)}
+/* Tone indicator bar: a 3px accent edge that mirrors the stat value's semantic
+   color, so card shape + color carry the same meaning at a glance. */
+.dshd-stat::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 3px 3px 0;background:transparent;transition:background .18s ease}
+.dshd-stat:has(.dshd-statValue[data-accent])::before{background:var(--dsw-alias-state-business-primary)}
+.dshd-stat:has(.dshd-statValue[data-good])::before{background:var(--dsw-alias-state-success-primary)}
+.dshd-stat:has(.dshd-statValue[data-warn])::before{background:var(--dsw-alias-state-warn-primary)}
+.dshd-stat:has(.dshd-statValue[data-bad])::before{background:var(--dsw-alias-state-error-primary)}
+.dshd-stat:has(.dshd-statValue[data-reasoning])::before{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 62%,var(--dsw-alias-state-error-primary) 38%)}
+.dshd-stat:hover::before{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 55%,transparent)}
 /* Stagger the stat grid (cap ~12 cards so the tail never feels laggy). */
 .dshd-stats .dshd-stat:nth-child(2){animation-delay:.04s}
 .dshd-stats .dshd-stat:nth-child(3){animation-delay:.08s}
@@ -151,6 +160,9 @@ const css = String.raw`
 .dshd-chevron{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:9px;transition:transform .15s ease,background .12s;border-radius:5px;cursor:pointer;margin:-4px 0}
 .dshd-chevron:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
 tr[data-open] .dshd-chevron{transform:rotate(90deg)}
+.dshd-chevronSvg{display:block;transition:transform .15s ease}
+.dshd-chevron[data-open] .dshd-chevronSvg,.dshd-chevronSvg[data-open]{transform:rotate(90deg)}
+.dshd-warnIcon{display:inline-block;vertical-align:-1px;flex:none}
 .dshd-model{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary);display:inline-block;vertical-align:bottom;min-width:0}
 .dshd-statusPill{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;border-radius:999px;padding:1px 8px;border:1px solid transparent;white-space:nowrap}
 .dshd-statusPill[data-s=complete]{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 30%,transparent)}
@@ -317,7 +329,7 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-vbar[data-hover]{transform:scaleY(1.12);filter:brightness(1.12)}
 .dshd-vcol[data-status=running] .dshd-vbar{animation:dshdPulse 1.4s ease-in-out infinite}
 .dshd-vcol[data-status=error] .dshd-vbar{opacity:.85;box-shadow:inset 0 0 0 1px var(--dsw-alias-state-error-primary)}
-.dshd-vtip{position:absolute;left:50%;transform:translateX(-50%);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:4px 9px;font-size:11px;line-height:1.4;color:var(--dsw-alias-label-primary);white-space:normal;overflow-wrap:anywhere;text-align:center;width:max-content;max-width:min(240px,80vw);z-index:20;pointer-events:none;box-shadow:var(--dsw-shadow-lv2,0 4px 12px rgb(0 0 0 / .22));font-variant-numeric:tabular-nums;box-sizing:border-box;animation:dshdTipIn .12s ease-out}
+.dshd-vtip{position:absolute;left:50%;transform:translateX(-50%);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 88%,transparent);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:4px 9px;font-size:11px;line-height:1.4;color:var(--dsw-alias-label-primary);white-space:normal;overflow-wrap:anywhere;text-align:center;width:max-content;max-width:min(240px,80vw);z-index:20;pointer-events:none;box-shadow:var(--dsw-shadow-lv2,0 4px 12px rgb(0 0 0 / .22));font-variant-numeric:tabular-nums;box-sizing:border-box;animation:dshdTipIn .12s ease-out}
 .dshd-areaWrap{position:relative;width:100%;cursor:crosshair}
 .dshd-areaGuide{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed;opacity:.55;pointer-events:none;z-index:2}
 .dshd-areaDot{position:absolute;width:9px;height:9px;border-radius:50%;transform:translate(-50%,-50%);border:2px solid var(--dsw-alias-bg-layer-1);box-shadow:0 1px 4px rgb(0 0 0 / .3);pointer-events:none;z-index:3}
@@ -363,6 +375,7 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-dot-idle{background:var(--dsw-alias-label-tertiary)}
 
 /* ── Board view (kanban-style columns) ────────────────────────────────────── */
+.dshd-boardTitle{font-size:13px;font-weight:700;color:var(--dsw-alias-label-primary);margin:6px 0 0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1)}
 .dshd-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;align-items:start}
 .dshd-col{display:flex;flex-direction:column;gap:8px;min-width:0}
 .dshd-col-title{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--dsw-alias-label-primary);margin:0;padding:2px 2px 0}

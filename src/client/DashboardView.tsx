@@ -88,6 +88,34 @@ function fmtCost(v: number): string {
   return `$${v.toFixed(4)}`;
 }
 
+/** Expand/collapse chevron (SVG, rotates 90° when open). */
+function ChevronIcon(props: { open: boolean }): JSX.Element {
+  return (
+    <svg
+      className="dshd-chevronSvg"
+      data-open={props.open || undefined}
+      viewBox="0 0 16 16"
+      width="10"
+      height="10"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M5.5 3l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Inline warning triangle (replaces the ⚠ emoji — semantic color via CSS). */
+function WarnIcon(): JSX.Element {
+  return (
+    <svg className="dshd-warnIcon" viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
+      <path d="M8 2.4 14.3 13.4H1.7z" fill="currentColor" />
+      <rect x="7.15" y="6.2" width="1.7" height="3.4" rx=".85" fill="var(--dsw-alias-bg-base)" />
+      <circle cx="8" cy="11.3" r="1" fill="var(--dsw-alias-bg-base)" />
+    </svg>
+  );
+}
+
 function StatCard(props: {
   label: string;
   value: string;
@@ -243,7 +271,7 @@ function RequestDetailPanel(props: {
             <div key={call.callId} className="dshd-toolRow">
               <span className="dshd-toolName">{call.name}</span>
               <span className="dshd-toolArgs" title={call.argsRaw ?? undefined}>{call.argsRaw ?? ""}</span>
-              {call.isError ? <span className="dshd-toolErr">⚠</span> : null}
+              {call.isError ? <span className="dshd-toolErr"><WarnIcon /></span> : null}
               <span className="dshd-toolDur">{call.durationMs === null ? t("unknown") : formatMs(call.durationMs)}</span>
             </div>
           ))
@@ -395,7 +423,7 @@ function TrendSection(props: {
                   }
                 }}
               >
-                ▸
+                <ChevronIcon open={open} />
               </span>
             </td>
             <td><span className="dshd-seq">{s.seq}</span></td>
@@ -997,12 +1025,12 @@ function TrendSection(props: {
                   aria-expanded={!isCollapsed}
                   onClick={() => toggleCollapsed(gkey)}
                 >
-                  <span className="dshd-chevron" data-open={isCollapsed ? undefined : true}>▸</span>
+                  <span className="dshd-chevron" data-open={isCollapsed ? undefined : true}><ChevronIcon open={!isCollapsed} /></span>
                   <span className="dshd-groupName">{g.label}</span>
                   <span className="dshd-groupStats">
                     {g.items.length} {t("pager.items")} · {t("trend.input")} {compactNumber(inSum)} · {t("trend.output")} {compactNumber(outSum)}
                     {durN > 0 ? ` · ${t("trend.duration")} ${formatMs(Math.round(durSum / durN))}` : ""}
-                    {errN > 0 ? ` · ⚠ ${errN}` : ""}
+                    {errN > 0 ? ` · ! ${errN}` : ""}
                   </span>
                 </button>
                 {!isCollapsed ? (
@@ -1279,7 +1307,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
     value: m.inputTokens + m.outputTokens,
     color: modelColor(m.model),
     title: `${m.provider} · avg duration ${m.avgDurationMs === null ? t("unknown") : formatMs(m.avgDurationMs)} · avg TTFT ${m.avgTtftMs === null ? t("unknown") : formatMs(m.avgTtftMs)} · ${m.errorCount} ${t("req.error")}`,
-    sub: `${m.requests} ${t("models.requests")} · ${compactNumber(m.inputTokens)}→${compactNumber(m.outputTokens)} · ${fmtCost(m.costUsd)}${m.avgDurationMs !== null ? ` · ${formatMs(m.avgDurationMs)}` : ""}${m.errorCount > 0 ? ` · ${m.errorCount}⚠` : ""}`
+    sub: `${m.requests} ${t("models.requests")} · ${compactNumber(m.inputTokens)}→${compactNumber(m.outputTokens)} · ${fmtCost(m.costUsd)}${m.avgDurationMs !== null ? ` · ${formatMs(m.avgDurationMs)}` : ""}${m.errorCount > 0 ? ` · ${m.errorCount}!` : ""}`
   }));
 
   const errorRows: RowDatum[] = [

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.2 (2026-08-17)
+
+### 视觉
+- 数值卡增加左侧语义色条(accent/成功/警告/错误/reasoning 随状态着色,悬停泛蓝)
+- tooltip 改毛玻璃质感(半透明背景 + 6px backdrop blur)
+- ⚠ emoji 替换为内嵌 SVG 警告三角(语义红),折叠箭头替换为 SVG chevron(开合旋转过渡)
+- 面积图顶部填充透明度 0.32 → 0.25,视觉更干净
+
+### 其他
+- style: dashboard motion polish — card/stat entrance stagger, hover lift with accent border + shadow, tooltip fade-in (respects prefers-reduced-motion)
+
+
 ## 0.2.1 (2026-08-17)
 
 ### 修复
