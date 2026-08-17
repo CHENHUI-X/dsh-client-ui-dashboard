@@ -10,7 +10,7 @@
  * trajectory view and inspects the request's first tool call, exactly like
  * the chat view's own inspect handoff.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tooltip } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ConvViewProps } from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type { PropsLocale, SnapshotSelectorHook } from "@deepseek-ai/dsh-client-ui-slots";
@@ -34,6 +34,13 @@ import {
   modelColor
 } from "./charts";
 import type { ChartDatum, RowDatum, SeriesDatum } from "./charts";
+
+/**
+ * 看板滚动记忆：按会话（sessionId）记录看板内部滚动容器的 scrollTop。
+ * 仅存于页面生命周期（模块级内存 Map）——刷新页面即清空，因此重启
+ * dsh 后端后看板默认从顶部开始；只有手动滚动才会写入，程序性恢复不回写。
+ */
+const scrollMemory = new Map<string, number>();
 
 /** The shared conversation store's action surface (structural subset). */
 interface SharedChatActions {
@@ -1083,7 +1090,42 @@ function FragmentRow(props: {
 
 /** The dashboard conversation-view entry. */
 export function DashboardView(props: DashboardViewProps): JSX.Element {
-  const { useSession, useProjection, t, actions } = props;
+  const { useSession, useProjection, t, actions, sessionId } = props;
+  // ── 看板自持滚动容器 + 按会话滚动记忆 ──────────────────────────────────
+  // 根元素声明 data-conversation-composer-overlay 后，会话列共享滚动体
+  // 让位（与轨迹视图同款官方模式），本视图拥有自己的滚动条，切换 tab
+  // 不会带跑对话/轨迹的滚动位置。滚动记忆见模块级 scrollMemory。
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const scrollHandlerRef = useRef<((ev: Event) => void) | null>(null);
+  const restoringRef = useRef(false);
+  const sessionRef = useRef(sessionId);
+  sessionRef.current = sessionId;
+
+  const bindRoot = useCallback((el: HTMLDivElement | null) => {
+    const prev = rootRef.current;
+    if (prev !== null && scrollHandlerRef.current !== null) {
+      prev.removeEventListener("scroll", scrollHandlerRef.current);
+    }
+    rootRef.current = el;
+    scrollHandlerRef.current = null;
+    if (el === null) return;
+    // 挂载时恢复该会话上次的位置；没有记忆则从顶部开始。
+    restoringRef.current = true;
+    el.scrollTop = scrollMemory.get(sessionRef.current) ?? 0;
+    restoringRef.current = false;
+    const onScroll = (): void => {
+      if (restoringRef.current) return; // 只记手动滚动，程序性恢复不回写
+      scrollMemory.set(sessionRef.current, el.scrollTop);
+    };
+    scrollHandlerRef.current = onScroll;
+    el.addEventListener("scroll", onScroll, { passive: true });
+  }, []);
+
+  // 切走 tab（卸载）时保存最后一次手动建立的位置。
+  useEffect(() => () => {
+    const el = rootRef.current;
+    if (el !== null) scrollMemory.set(sessionRef.current, el.scrollTop);
+  }, []);
   const trajectory = useSession((s) => s.views.get("trajectory"));
   const nodes = useSession((s) => s.chat.legacy.nodes);
   const turnTimings = useSession((s) => s.turnTimings);
@@ -1178,7 +1220,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   if (!hasData) {
     return (
-      <div className="dshd-root">
+      <div ref={bindRoot} className="dshd-root" data-conversation-composer-overlay="">
         <div className="dshd-header">
           <div className="dshd-title">
             <span>{t("view.dashboard")}</span>
@@ -1298,7 +1340,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
   }
 
   return (
-    <div className="dshd-root">
+    <div ref={bindRoot} className="dshd-root" data-conversation-composer-overlay="">
       <div className="dshd-header">
         <div className="dshd-title">
           <span>{t("view.dashboard")}</span>
