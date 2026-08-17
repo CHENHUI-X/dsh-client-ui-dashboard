@@ -4,7 +4,7 @@
  * framework-provided data, so it is trivially testable and re-runs cheaply
  * on every snapshot/projection change.
  */
-import type { ConversationNode, ConversationSnapshot, ToolResultNode } from "@deepseek-ai/dsh-client-runtime/client";
+import type { ConversationNode, ConversationSnapshot, RunningToolCall, ToolCallBlock, ToolResultNode } from "@deepseek-ai/dsh-client-runtime/client";
 import type { TrajectorySnapshot } from "./trajectory-contract";
 import type { SessionStatsProjection } from "@deepseek-ai/dsh-session-stats/client";
 import type { TokenUsageProjection, ContextBreakdownProjection, ContextPressureProjection } from "@deepseek-ai/dsh-token-meter/client";
@@ -399,10 +399,12 @@ export function estimateRequestCostUsd(
   );
 }
 
-/** Cache savings of one request (cache reads billed at miss rate), priced by its own model. */
+/** Cache savings of one request (cache reads billed at the hit rate, so the
+ *  savings = what those tokens would have cost uncached minus what they cost
+ *  cached), priced by its own model. */
 export function estimateCacheSavingsUsd(model: string | null, cacheReadTokens: number): number {
-  const miss = isReasonerModel(model) ? DEEPSEEK_PRICES.reasoner.miss : DEEPSEEK_PRICES.chat.miss;
-  return (cacheReadTokens * miss) / 1_000_000;
+  const p = isReasonerModel(model) ? DEEPSEEK_PRICES.reasoner : DEEPSEEK_PRICES.chat;
+  return (cacheReadTokens * (p.miss - p.hit)) / 1_000_000;
 }
 
 /** Count conversation nodes by dashboard role buckets. */
@@ -457,9 +459,21 @@ export function indexToolCalls(nodes: readonly ConversationNode[]): Map<number, 
       isError: node.isError
     });
     for (const sub of node.subCalls) {
-      if ("subCalls" in sub && Array.isArray((sub as ToolResultNode).subCalls)) {
-        collect(sub as ToolResultNode); // nested tool-result: keep the ledger consistent with the histogram
+      // ToolResultNode carries `kind`; RunningToolCall does not. Both have
+      // subCalls, so discriminate on kind — otherwise in-flight nested calls
+      // are misread as results (ghost "tool" rows, NaN durations).
+      if ("kind" in sub) {
+        collect(sub);
+      } else {
+        add({ callId: sub.callId, name: sub.name, argsRaw: sub.argsRaw, durationMs: null, isError: false });
+        collectRunning(sub);
       }
+    }
+  };
+  const collectRunning = (node: RunningToolCall) => {
+    for (const sub of node.subCalls) {
+      if ("kind" in sub) collect(sub as ToolResultNode);
+      else collectRunning(sub);
     }
   };
   for (const node of nodes) {
@@ -485,12 +499,21 @@ export function toolHistogram(nodes: readonly ConversationNode[]): ToolCallSampl
   const walk = (node: ToolResultNode) => {
     bump(node.call?.name ?? "tool", node.isError);
     for (const sub of node.subCalls) {
-      if ("subCalls" in sub && Array.isArray((sub as ToolResultNode).subCalls)) {
-        walk(sub as ToolResultNode); // nested tool-result: recurse so depth ≥ 2 sub-calls are counted
+      if ("kind" in sub) {
+        walk(sub); // nested tool-result: recurse so depth ≥ 2 sub-calls are counted
       } else {
-        const name = "name" in sub ? sub.name : sub.call?.name ?? "tool";
-        const isError = "isError" in sub && sub.isError === true;
-        bump(name, isError);
+        // In-flight nested call (RunningToolCall): name lives on the call itself.
+        bump(sub.name, false);
+        walkRunning(sub);
+      }
+    }
+  };
+  const walkRunning = (node: RunningToolCall) => {
+    for (const sub of node.subCalls) {
+      if ("kind" in sub) walk(sub as ToolResultNode);
+      else {
+        bump(sub.name, false);
+        walkRunning(sub);
       }
     }
   };
@@ -510,11 +533,14 @@ export function toolDurationTop(callsByRequest: Iterable<readonly ToolCallDetail
   const rows = new Map<string, { calls: number; totalMs: number; maxMs: number }>();
   for (const calls of callsByRequest) {
     for (const call of calls) {
-      if (call.durationMs === null) continue;
+      // NaN (e.g. a duration computed from a missing timestamp) must not pollute
+      // the totals — only finite durations count.
+      const d = call.durationMs;
+      if (d === null || Number.isNaN(d)) continue;
       const row = rows.get(call.name) ?? { calls: 0, totalMs: 0, maxMs: 0 };
       row.calls += 1;
-      row.totalMs += call.durationMs;
-      row.maxMs = Math.max(row.maxMs, call.durationMs);
+      row.totalMs += d;
+      row.maxMs = Math.max(row.maxMs, d);
       rows.set(call.name, row);
     }
   }
@@ -559,6 +585,10 @@ export function assistantTtft(nodes: readonly ConversationNode[]): AssistantTtft
   const out: AssistantTtftSample[] = [];
   for (const node of nodes) {
     if (node.kind !== "assistant") continue;
+    // Interrupted turns are frozen with a synthetic fractional seq that can
+    // never match a request.resultSeq — exclude them so the TTFT sample set
+    // stays consistent with ttftByCache/modelSplit (which join on resultSeq).
+    if (!Number.isInteger(node.seq)) continue;
     const timing = node.timing;
     if (timing?.stepStartTime === null || timing?.firstTokenTime === null) continue;
     if (timing === undefined || timing.stepStartTime === null || timing.firstTokenTime === null) continue;
@@ -694,7 +724,9 @@ export function modelSplit(
     row.outputTokens += s.outputTokens;
     row.costUsd += s.costUsd;
     if (s.status === "error") row.errorCount += 1;
-    if (s.durationMs !== null) {
+    // Only completed requests feed the duration average (consistent with
+    // durationStats/failedStats); failed attempts otherwise skew the row.
+    if (s.status === "complete" && s.durationMs !== null) {
       row.durSum += s.durationMs;
       row.durN += 1;
     }

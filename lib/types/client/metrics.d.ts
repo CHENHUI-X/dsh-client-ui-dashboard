@@ -321,7 +321,9 @@ export declare function estimateRequestCostUsd(model: string | null, usage: {
     cacheWriteTokens: number;
     outputTokens: number;
 }): number;
-/** Cache savings of one request (cache reads billed at miss rate), priced by its own model. */
+/** Cache savings of one request (cache reads billed at the hit rate, so the
+ *  savings = what those tokens would have cost uncached minus what they cost
+ *  cached), priced by its own model. */
 export declare function estimateCacheSavingsUsd(model: string | null, cacheReadTokens: number): number;
 /** Count conversation nodes by dashboard role buckets. */
 export declare function countRoles(nodes: readonly ConversationNode[]): RoleCounts;

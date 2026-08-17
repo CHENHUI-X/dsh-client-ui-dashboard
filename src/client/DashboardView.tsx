@@ -81,8 +81,11 @@ function Hint(props: { label: string }): JSX.Element {
 function fmtCost(v: number): string {
   if (v <= 0) return "$0";
   if (v >= 1) return `$${v.toFixed(2)}`;
-  if (v >= 0.01) return `$${v.toFixed(4)}`;
-  return "<$0.0001";
+  // Only collapse to "<$0.0001" when the value truly rounds to zero at 4
+  // decimals; anything ≥ $0.00005 keeps its exact figure (a $0.0099 request
+  // must not read as "<$0.0001").
+  if (v < 0.00005) return "<$0.0001";
+  return `$${v.toFixed(4)}`;
 }
 
 function StatCard(props: {
@@ -616,7 +619,7 @@ function TrendSection(props: {
           <div className="dshd-seriesLabel">
             <span style={{ width: 9, height: 9, borderRadius: 2.5, background: CHART_COLORS.cacheRead, display: "inline-block" }} />
             {t("trend.cacheHit")}
-            <span className="dshd-seriesTotal">{metrics.cacheHitPercent === null ? "—" : `${metrics.cacheHitPercent}%`}</span>
+            <span className="dshd-seriesTotal">{metrics.cacheHitPercent === null ? "—" : `${metrics.cacheHitPercent}%`} <span className="dshd-scopeTag">{t("stat.scopeAll")}</span></span>
           </div>
           <AreaChart
             series={hitBars}
@@ -1435,7 +1438,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             label={t("stat.decodeSpeed")}
             value={metrics.decodeTokensPerSec === null ? t("unknown") : `${Math.round(metrics.decodeTokensPerSec)} ${t("unit.tps")}`}
             hint={t("hint.decodeSpeed")}
-            sub={`${compactNumber(metrics.decodeTokens)} ${t("trend.output")} / ${formatMs(metrics.decodeMs)}`}
+            sub={`${compactNumber(metrics.decodeTokens)} ${t("trend.output")} / ${formatMs(metrics.decodeMs)} · ${t("stat.scopeAll")}`}
           />
         </div>
       </section>
@@ -1448,7 +1451,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         </div>
         <div className="dshd-stats">
           <StatCard label={t("stat.inputTokens")} value={exactNumber(metrics.inputTokens)} hint={t("hint.inputTokens")} tone="accent" spark={{ values: sparkInput, color: CHART_COLORS.input, title: t("trend.newestRight") }} />
-          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} sub={metrics.reasoningTokens > 0 ? `${t("tokens.reasoning")} ${compactNumber(metrics.reasoningTokens)}` : undefined} spark={{ values: sparkOutput, color: CHART_COLORS.output, title: t("trend.newestRight") }} />
+          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} sub={metrics.reasoningTokens > 0 ? `${t("tokens.reasoning")} ${compactNumber(metrics.reasoningTokens)} (${t("role.windowNote")})` : undefined} spark={{ values: sparkOutput, color: CHART_COLORS.output, title: t("trend.newestRight") }} />
           <StatCard
             label={t("stat.reasoningTokens")}
             value={exactNumber(metrics.reasoningTokens)}
@@ -1542,6 +1545,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         <section className="dshd-card">
           <div className="dshd-cardHead">
             <span className="dshd-cardTitle">{t("section.timing")}</span>
+            <span className="dshd-cardHint">{t("stat.scopeAll")}</span>
           </div>
           <StackedBar
             data={[

@@ -168,6 +168,7 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-seriesCol{flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:6px}
 .dshd-seriesLabel{font-size:11px;color:var(--dsw-alias-label-secondary);display:flex;align-items:center;gap:6px}
 .dshd-seriesTotal{font-size:11px;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:550}
+.dshd-scopeTag{font-family:var(--ds-font-family-base,ui-sans-serif,system-ui,sans-serif);font-size:9.5px;font-weight:600;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-label-secondary) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-label-secondary) 25%,transparent);border-radius:4px;padding:0 4px;vertical-align:1px;white-space:nowrap}
 .dshd-axisHint{font-size:10px;color:var(--dsw-alias-label-secondary);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Trend filters */

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1 (2026-08-17)
+
+### 修复
+- **缓存节省公式**:`estimateCacheSavingsUsd` 误按未命中价 × 全部命中 token,高估约 35%;改为 `命中 token × (未命中价 − 命中价)`,与成本卡总成本(已按命中价计费)可互相印证
+- **嵌套进行中调用误处理**:流式过程中父工具先返回、子调用(RunningToolCall)仍在跑时,递归判别 `"subCalls" in sub` 恒真导致幽灵 "tool" 直方图条目与 NaN 耗时合计;改为按 `"kind" in sub` 判别类型 + NaN 兜底
+- **TTFT 样本集统一**:`assistantTtft` 排除 interrupted 合成节点(分数 seq),与 `ttftByCache`/`modelSplit`(按 resultSeq 关联)样本集一致
+- **模型行平均耗时**:仅统计 completed 请求,不再混入失败尝试(与 P50/P95 口径一致)
+- **小成本金额显示**:`fmtCost` 对 $0.005~$0.0099 区间不再误显 "<$0.0001"(低估最多 99×),精确到 4 位小数
+
+### 改进
+- reasoningTokens 窗口口径标注(输出卡推理 sub + hint);Timing 卡、解码速度、趋势头部命中率补"全量"徽标
+
 ## 0.2.0 (2026-08-17)
 
 ### 新增
