@@ -129,6 +129,10 @@ Users then install with `dsh plugin --profile web add dsh-client-ui-dashboard` (
 | context composition | `useProjection("contextBreakdown")` |
 | per-request series, roles | `useSession(s => s.views.get("trajectory"))` — the trajectory view snapshot (window-scoped) |
 
+## Contributors
+
+- [@fsvov](https://github.com/fsvov) — dashboard-owned scroll container with per-session scroll memory (PR #1)
+
 ## License
 
 MIT

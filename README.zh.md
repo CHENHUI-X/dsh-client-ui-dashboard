@@ -129,6 +129,10 @@ npm publish                    # prepublishOnly 会自动先构建
 | 上下文构成 | `useProjection("contextBreakdown")` |
 | 请求序列、角色分布 | `useSession(s => s.views.get("trajectory"))`——trajectory 视图快照(窗口范围) |
 
+## 贡献者
+
+- [@fsvov](https://github.com/fsvov) — 看板自持滚动容器与按会话记忆滚动位置(PR #1)
+
 ## License
 
 MIT
