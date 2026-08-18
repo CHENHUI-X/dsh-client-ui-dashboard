@@ -10,7 +10,14 @@ export const PLUGIN_ID = "dsh-client-ui-dashboard";
 export function injectDashboardStyles(): void {
   if (typeof document === "undefined") return;
   const tagId = `${PLUGIN_ID}/dashboard.css`;
-  if (document.querySelector(`style[data-plugin-css=${JSON.stringify(tagId)}]`) !== null) return;
+  const existing = document.querySelector<HTMLStyleElement>(`style[data-plugin-css=${JSON.stringify(tagId)}]`);
+  // DSH can replace a client bundle without recreating the document. Keep the
+  // one style node, but refresh its text so an already-open tab never retains
+  // an older layout revision.
+  if (existing !== null) {
+    if (existing.textContent !== css) existing.textContent = css;
+    return;
+  }
   const tag = document.createElement("style");
   tag.dataset.plugin = PLUGIN_ID;
   tag.dataset.pluginCss = tagId;
@@ -248,9 +255,11 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-streamDot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-state-business-primary);animation:dshdPulse 1.4s ease-in-out infinite;flex:none}
 .dshd-streamText{font-variant-numeric:tabular-nums}
 .dshd-streamTool{display:inline-flex;align-items:center;gap:4px;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:10.5px;color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent);border-radius:999px;padding:1px 8px;font-variant-numeric:tabular-nums}
+.dshd-streamBody{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
+.dshd-streamHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 
-/* Sticky summary strip */
-.dshd-summary{display:flex;gap:8px;flex-wrap:wrap;position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--dsw-alias-bg-base) 88%,transparent);backdrop-filter:blur(6px);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:6px 10px}
+/* Summary strip */
+.dshd-summary{display:flex;gap:8px;flex-wrap:wrap;background:color-mix(in srgb,var(--dsw-alias-bg-base) 88%,transparent);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:6px 10px}
 .dshd-summaryItem{display:inline-flex;align-items:baseline;gap:5px;font-size:11px}
 .dshd-summaryLabel{color:var(--dsw-alias-label-tertiary)}
 .dshd-summaryValue{font-weight:650;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace)}
@@ -360,13 +369,17 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-healthTag[data-k="loop"]{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 35%,transparent)}
 .dshd-healthTag[data-k="noProgress"]{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 12%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary) 35%,transparent)}
 
-/* ── HUD strip (shared by Dashboard + Board views) ───────────────────────────
+/* ── HUD strip (top of the Dashboard view) ───────────────────────────────────
    一条实时状态条:点 + 文字并用(不靠颜色单独传达信息);整条是一个原子
-   role=status 区域,异步更新以语境文案宣布(如 "2 个运行中")而非裸数字。 */
-.dshd-hud{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-bg-module));border:1px solid var(--dsw-alias-border-l1);border-radius:8px;flex:none}
+   role=status 区域,异步更新以语境文案宣布(如 "2 个运行中")而非裸数字。
+   背景用 bg-layer-1 + border-l2:在浅色主题的纯白页面上仍保有可见的
+   容器感(bg-module-platform 叠白底对比度趋零,已弃用)。 */
+.dshd-hud{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;flex:none}
 .dshd-hud-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;line-height:1.5;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 9px;max-width:100%}
 .dshd-hud-label{color:var(--dsw-alias-label-tertiary);flex:none}
 .dshd-hud-value{font-weight:600;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* 状态圆点:基类定义尺寸(成员列表/看板共用),颜色类只上色 */
+.dshd-dot{width:7px;height:7px;border-radius:50%;flex:none}
 .dshd-hud-dot{width:7px;height:7px;border-radius:50%;flex:none}
 .dshd-dot-accent{background:var(--dsw-alias-state-business-primary)}
 .dshd-dot-good{background:var(--dsw-alias-state-success-primary)}
@@ -374,22 +387,32 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-dot-bad{background:var(--dsw-alias-state-error-primary)}
 .dshd-dot-idle{background:var(--dsw-alias-label-tertiary)}
 
-/* ── Board view (kanban-style columns) ────────────────────────────────────── */
-.dshd-boardTitle{font-size:13px;font-weight:700;color:var(--dsw-alias-label-primary);margin:6px 0 0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1)}
-.dshd-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;align-items:start}
-.dshd-col{display:flex;flex-direction:column;gap:8px;min-width:0}
-.dshd-col-title{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--dsw-alias-label-primary);margin:0;padding:2px 2px 0}
-.dshd-col-count{font-size:10px;font-weight:600;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:0 6px;font-variant-numeric:tabular-nums}
+/* ── Board view (content-aware kanban) ────────────────────────────────────── */
+.dshd-boardTitle{font-size:14px;font-weight:700;color:var(--dsw-alias-label-primary);margin:6px 0 0;padding-top:16px;border-top:1px solid var(--dsw-alias-border-l1)}
+.dshd-board-statuses{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.dshd-board-status{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;padding:7px 9px;font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;font-variant-numeric:tabular-nums}
+.dshd-board-status-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:18px;padding:0 5px;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-1);border-radius:999px;font-size:10px;font-weight:700}
+.dshd-board-status[data-populated]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l1)}
+.dshd-board-status[data-populated] .dshd-board-status-count{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,var(--dsw-alias-bg-base))}
+.dshd-board-status[data-state="blocked"][data-populated] .dshd-board-status-count{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,var(--dsw-alias-bg-base))}
+.dshd-board-status[data-state="done"][data-populated] .dshd-board-status-count{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,var(--dsw-alias-bg-base))}
+.dshd-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:start}
+.dshd-col{display:flex;flex-direction:column;gap:10px;min-width:0;padding:10px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 68%,var(--dsw-alias-bg-base));border:1px solid var(--dsw-alias-border-l2);border-radius:12px}
+.dshd-col[data-empty="true"]{display:none}
+.dshd-col-title{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--dsw-alias-label-primary);margin:0;padding:0 2px 8px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.dshd-col-count{font-size:10px;font-weight:700;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:0 6px;font-variant-numeric:tabular-nums}
 .dshd-col-body{display:flex;flex-direction:column;gap:8px;min-height:24px}
-.dshd-bcard{display:flex;flex-direction:column;gap:4px;background:var(--dsw-alias-bg-module);border:1px solid var(--dsw-alias-border-l1);border-left-width:3px;border-radius:8px;padding:8px 10px;min-width:0}
+.dshd-col-planned .dshd-col-body{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:stretch}
+.dshd-col-planned .dshd-bcard{height:100%}
+.dshd-bcard{display:flex;flex-direction:column;gap:6px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-left-width:3px;border-radius:10px;padding:10px 11px;min-width:0}
 .dshd-bcard-accent{border-left-color:var(--dsw-alias-state-business-primary)}
 .dshd-bcard-good{border-left-color:var(--dsw-alias-state-success-primary)}
 .dshd-bcard-warn{border-left-color:var(--dsw-alias-state-warn-primary)}
 .dshd-bcard-bad{border-left-color:var(--dsw-alias-state-error-primary)}
 .dshd-bcard-idle{border-left-color:var(--dsw-alias-border-l2)}
-.dshd-bcard-head{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
-.dshd-bcard-title{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-width:0}
-.dshd-bcard-meta{font-size:10px;color:var(--dsw-alias-label-tertiary);flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dshd-bcard-head{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+.dshd-bcard-title{font-size:12px;font-weight:600;line-height:1.45;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-width:0}
+.dshd-bcard-meta{font-size:10px;color:var(--dsw-alias-label-tertiary);line-height:1.4;font-variant-numeric:tabular-nums}
 .dshd-bcard-body{font-size:11px;color:var(--dsw-alias-label-secondary)}
 .dshd-bcard-note{margin:0;font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .dshd-member-list{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
@@ -398,4 +421,121 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-member-phase{color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:70px}
 .dshd-member-outcome{margin-left:auto;color:var(--dsw-alias-label-tertiary);flex:none;font-size:10px}
 .dshd-board-hint{font-size:10.5px;color:var(--dsw-alias-label-tertiary);margin:0;text-align:center}
+@media (max-width:640px){.dshd-board-statuses{grid-template-columns:repeat(2,minmax(0,1fr))}.dshd-col-planned .dshd-col-body{grid-template-columns:1fr}.dshd-bcard{padding:9px 10px}}
+
+/* ── Dashboard information architecture ─────────────────────────────────────
+   One visual scale for the whole tab: current state first, compact summary
+   second, metrics third, then deeper analysis. Non-interactive panels do not
+   lift on hover, so movement consistently signals an actionable element. */
+.dshd-root{position:relative;display:flex;flex:1 1 0;height:auto;gap:20px;padding:20px 24px 32px;max-width:1280px;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain;scrollbar-gutter:stable;padding-bottom:calc(32px + var(--dsh-composer-height,0px))}
+.dshd-header{min-height:52px;padding:10px 12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;gap:8px}
+.dshd-title{font-size:16px;font-weight:700;margin-right:2px}
+.dshd-live{padding:3px 9px;font-weight:600}
+.dshd-chip{padding:3px 8px;background:var(--dsw-alias-bg-base)}
+
+/* Current activity is a scan-friendly grid instead of an unstructured chip row. */
+.dshd-hud{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;padding:0;background:transparent;border:none;border-radius:0}
+.dshd-hud-chip{display:grid;grid-template-columns:8px minmax(0,1fr);grid-template-areas:"dot label" "dot value";column-gap:7px;row-gap:1px;min-height:58px;padding:9px 10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-left:3px solid var(--dsw-alias-border-l1);border-radius:10px}
+.dshd-hud-dot{grid-area:dot;align-self:center}
+.dshd-hud-label{grid-area:label;font-size:10px;line-height:1.3;text-transform:uppercase;letter-spacing:.04em}
+.dshd-hud-value{grid-area:value;font-size:12px;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+.dshd-hud-chip[data-tone="accent"]{border-left-color:var(--dsw-alias-state-business-primary)}
+.dshd-hud-chip[data-tone="good"]{border-left-color:var(--dsw-alias-state-success-primary)}
+.dshd-hud-chip[data-tone="warn"]{border-left-color:var(--dsw-alias-state-warn-primary)}
+.dshd-hud-chip[data-tone="bad"]{border-left-color:var(--dsw-alias-state-error-primary)}
+
+/* Keep the dashboard identity and its key figures in one complete frame in
+   normal document flow. It must scroll with the dashboard content instead of
+   following the viewport. */
+.dshd-dashboardHead{display:flex;flex:0 0 auto;flex-direction:column;align-self:stretch;width:100%;max-width:100%;min-width:0;overflow:hidden;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;box-shadow:none}
+.dshd-dashboardHead .dshd-header{min-height:52px;padding:10px 12px;background:transparent;border:0;border-radius:0}
+.dshd-summary{position:static;inset:auto;z-index:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:0;align-self:stretch;flex:0 0 auto;width:100%;max-width:100%;min-width:0;margin:0;padding:6px 0;background:transparent;border:0;border-top:1px solid var(--dsw-alias-border-l2);border-radius:0;backdrop-filter:none}
+.dshd-summaryItem{display:flex;flex-direction:column;gap:2px;min-width:0;padding:4px 14px;background:transparent;border-inline-start:1px solid var(--dsw-alias-border-l2)}
+.dshd-summaryItem:first-child{border-inline-start:0}
+.dshd-summaryLabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+.dshd-summaryValue{font-size:13px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dshd-streamRow{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px 10px;min-height:56px;padding:10px 14px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:12px}
+.dshd-streamRow>.dshd-streamDot{margin-top:6px}
+.dshd-streamBody{display:flex;flex-direction:column;gap:6px;min-width:0;overflow:hidden}
+.dshd-streamHead{display:flex;align-items:center;gap:8px;min-width:0;min-height:20px;overflow:hidden;white-space:nowrap}
+.dshd-streamText{flex:none;font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary)}
+.dshd-streamHead .dshd-streamTool,.dshd-streamHead .dshd-streamWarn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dshd-streamLine{display:flex;align-items:center;gap:7px;min-width:0;height:25px;padding:3px 7px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:7px;overflow:hidden;white-space:nowrap}
+.dshd-streamLine[data-kind="reasoning"]{border-left:3px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary) 68%,var(--dsw-alias-state-error-primary) 32%);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 5%,var(--dsw-alias-bg-base))}
+.dshd-streamLine[data-kind="text"]{border-left:3px solid var(--dsw-alias-state-business-primary)}
+.dshd-streamLine[data-kind="tool-call"]{border-left:3px solid var(--dsw-alias-state-success-primary)}
+.dshd-streamLine[data-kind="empty"]{border-left:3px solid var(--dsw-alias-border-l1)}
+.dshd-streamMarker{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:37px;height:17px;padding:0 5px;border-radius:5px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.dshd-streamLine[data-kind="reasoning"] .dshd-streamMarker{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 12%,transparent)}
+.dshd-streamLine[data-kind="text"] .dshd-streamMarker{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent)}
+.dshd-streamLine[data-kind="tool-call"] .dshd-streamMarker{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent)}
+.dshd-streamSegmentLabel{flex:none;max-width:100px;font-size:10.5px;font-weight:600;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dshd-streamLineText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:10.5px;line-height:1.4}
+
+/* Metrics share predictable density; analytical cards become two readable columns. */
+.dshd-card{padding:18px;gap:14px;background:var(--dsw-alias-bg-base);border-color:var(--dsw-alias-border-l2);border-radius:14px;box-shadow:none;transition:border-color .16s ease}
+.dshd-card:hover{transform:none;box-shadow:none;border-color:var(--dsw-alias-border-l1)}
+.dshd-cardHead{align-items:flex-start;gap:6px 10px;padding-bottom:10px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.dshd-cardTitle{font-size:14px;font-weight:700}
+.dshd-cardTitle::before{height:15px;background:var(--dsw-alias-state-business-primary)}
+.dshd-cardHint{font-size:10.5px;line-height:1.45}
+.dshd-grid2{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.dshd-card .dshd-col{gap:10px}
+.dshd-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.dshd-stat{min-height:96px;padding:12px 14px;gap:5px;background:var(--dsw-alias-bg-layer-1);border-radius:10px;box-shadow:none;transition:border-color .16s ease,background .16s ease}
+.dshd-stat:hover{transform:none;box-shadow:none;background:var(--dsw-alias-bg-base);border-color:var(--dsw-alias-border-l1)}
+.dshd-statValue{font-size:clamp(18px,1.05rem + .55vw,24px);line-height:1.15}
+.dshd-statSpark{margin-top:auto}
+.dshd-statSub{line-height:1.4;white-space:normal}
+
+/* Subagent status: one source of truth, with settled children kept out of a
+   misleading "planned" bucket. The status text always accompanies the dot. */
+.dshd-subagentStatusBar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.dshd-subagentStatusStat{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;padding:8px 10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:9px;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:600}
+.dshd-subagentStatusStat strong{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:19px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);font-size:10px;font-variant-numeric:tabular-nums}
+.dshd-subagentStatusStat[data-populated]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l1)}
+.dshd-subagentStatusStat[data-state="running"][data-populated] strong{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,var(--dsw-alias-bg-base))}
+.dshd-subagentStatusStat[data-state="completed"][data-populated] strong{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,var(--dsw-alias-bg-base))}
+.dshd-subagentStatusStat[data-state="inactive"][data-populated] strong{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1)}
+.dshd-subagentPanel{display:flex;flex-direction:column;gap:12px;padding:12px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 68%,var(--dsw-alias-bg-base));border:1px solid var(--dsw-alias-border-l2);border-radius:12px}
+.dshd-subagentPanelHead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 2px 9px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.dshd-subagentPanelHead h3{margin:0;font-size:12px;font-weight:700;color:var(--dsw-alias-label-primary)}
+.dshd-subagentPanelHead span{display:block;margin-top:3px;color:var(--dsw-alias-label-tertiary);font-size:10px}
+.dshd-subagentGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;align-items:stretch}
+.dshd-subagentCard{display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-width:0;min-height:76px;padding:11px 12px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-left:3px solid var(--dsw-alias-border-l2);border-radius:10px}
+.dshd-subagentCard[data-state="running"]{border-left-color:var(--dsw-alias-state-business-primary)}
+.dshd-subagentCard[data-state="completed"]{border-left-color:var(--dsw-alias-state-success-primary)}
+.dshd-subagentCardHead{display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:start;gap:8px;min-width:0}
+.dshd-subagentDot{width:8px;height:8px;margin-top:5px;border-radius:50%;background:var(--dsw-alias-label-tertiary);flex:none}
+.dshd-subagentCard[data-state="running"] .dshd-subagentDot{background:var(--dsw-alias-state-business-primary);animation:dshdPulse 1.4s ease-in-out infinite}
+.dshd-subagentCard[data-state="completed"] .dshd-subagentDot{background:var(--dsw-alias-state-success-primary)}
+.dshd-subagentIdentity{display:flex;flex-direction:column;gap:3px;min-width:0}
+.dshd-subagentTitle{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary);font-size:12px;font-weight:650;line-height:1.4}
+.dshd-subagentMode{color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:1.3}
+.dshd-subagentStatus{flex:none;padding:3px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:1.2;white-space:nowrap}
+.dshd-subagentCard[data-state="running"] .dshd-subagentStatus{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,var(--dsw-alias-bg-base))}
+.dshd-subagentCard[data-state="completed"] .dshd-subagentStatus{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,var(--dsw-alias-bg-base))}
+.dshd-subagentMeta{display:flex;align-items:center;gap:8px;min-width:0;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:9.5px;line-height:1.35}
+.dshd-subagentMeta>span:first-child{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dshd-subagentMetaHint{flex:none;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:inherit;color:var(--dsw-alias-label-tertiary)}
+.dshd-subagentOpen{flex:none;min-height:28px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font:inherit;font-family:var(--ds-font-family-sans,inherit);font-size:10px;line-height:1.2;white-space:nowrap;cursor:pointer;transition:color .16s ease,border-color .16s ease,background .16s ease}
+.dshd-subagentOpen:hover{color:var(--dsw-alias-state-business-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 42%,var(--dsw-alias-border-l1));background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 8%,var(--dsw-alias-bg-base))}
+.dshd-subagentOpen:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 72%,transparent);outline-offset:2px}
+.dshd-subagentEmpty{margin:0;padding:18px 12px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:10px}
+
+@media (max-width:900px){
+  .dshd-root{gap:16px;padding:16px 16px 28px;padding-bottom:calc(28px + var(--dsh-composer-height,0px))}
+  .dshd-grid2{grid-template-columns:1fr}
+  .dshd-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:560px){
+  .dshd-header{padding:9px 10px}
+  .dshd-spacer{display:none}
+  .dshd-hud{grid-template-columns:1fr}
+  .dshd-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dshd-stats{grid-template-columns:1fr}
+  .dshd-card{padding:14px}
+  .dshd-subagentStatusBar{grid-template-columns:1fr}
+  .dshd-subagentGrid{grid-template-columns:1fr}
+}
 `;

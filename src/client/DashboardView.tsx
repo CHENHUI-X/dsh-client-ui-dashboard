@@ -18,6 +18,11 @@ import type { NS } from "./locales";
 import { deriveMetrics } from "./metrics";
 import type { DashboardMetrics, RequestDetail, RequestSample } from "./metrics";
 import { CHART_COLORS } from "./dashboard.css";
+import { HudStrip, useHudData } from "./HudStrip";
+import { BoardBody } from "./BoardView";
+import type { BoardNavigation } from "./BoardView";
+import { childEntries } from "./board";
+import type { SubagentEntryLike } from "./board";
 import {
   AreaChart,
   DonutChart,
@@ -54,7 +59,7 @@ export type DashboardViewProps = ConvViewProps &
   PropsLocale<typeof NS> & {
     useStore?: SnapshotSelectorHook<unknown>;
     actions?: SharedChatActions;
-  };
+  } & BoardNavigation;
 
 /** Categorical palette for non-model series (tool names, commands): deterministic,
  *  distinct hues in every theme. Models use the shared `modelColor` hash so the
@@ -67,6 +72,136 @@ const TOOL_COLORS: readonly string[] = [
   "color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-state-warn-primary) 45%)",
   "color-mix(in srgb, var(--dsw-alias-state-error-primary) 60%, var(--dsw-alias-state-warn-primary) 40%)"
 ];
+const STREAM_MAX_CHARS = 100;
+
+type StreamingBlockLike = {
+  text?: unknown;
+  kind?: unknown;
+  type?: unknown;
+  name?: unknown;
+  argsRaw?: unknown;
+  block?: unknown;
+};
+
+type StreamingItem = {
+  kind: "text" | "reasoning" | "tool-call" | "other";
+  text: string;
+  name?: string;
+};
+
+function gatherStreamFragments(input: unknown, out: StreamingItem[]): void {
+  if (input === null || input === undefined) return;
+  if (typeof input === "string") {
+    out.push({ kind: "text", text: input });
+    return;
+  }
+  if (typeof input !== "object") return;
+
+  if (Array.isArray(input)) {
+    for (const item of input) gatherStreamFragments(item, out);
+    return;
+  }
+
+  const item = input as StreamingBlockLike & { blocks?: unknown[]; content?: unknown; contentBlocks?: unknown; output?: unknown; reason?: unknown };
+
+  if (typeof item.text === "string") {
+    const value = item.text as string;
+    const kind = item.kind ?? item.type;
+    if (kind === "reasoning") {
+      out.push({ kind: "reasoning", text: value });
+    } else if (kind === "tool-call") {
+      out.push({ kind: "tool-call", text: value, name: typeof item.name === "string" ? item.name : undefined });
+    } else {
+      out.push({ kind: "text", text: value });
+    }
+    return;
+  }
+
+  const kind = item.kind ?? item.type;
+  if (kind === "tool-call" && (typeof item.argsRaw === "string" || typeof item.name === "string")) {
+    out.push({
+      kind: "tool-call",
+      text: typeof item.argsRaw === "string" ? item.argsRaw : "",
+      name: typeof item.name === "string" ? item.name : undefined
+    });
+    return;
+  }
+
+  if (kind === "other" && item.block !== undefined) {
+    let detail: string | undefined;
+    if (typeof item.block === "string") {
+      detail = item.block;
+    } else {
+      try {
+        detail = JSON.stringify(item.block);
+      } catch {
+        detail = "[unserializable block]";
+      }
+    }
+    if (detail !== undefined) out.push({ kind: "other", text: detail });
+    return;
+  }
+
+  if (Array.isArray(item.blocks)) {
+    gatherStreamFragments(item.blocks, out);
+  }
+  if (item.content !== undefined) {
+    gatherStreamFragments(item.content, out);
+  }
+  if (item.contentBlocks !== undefined) {
+    gatherStreamFragments(item.contentBlocks, out);
+  }
+  if (item.output !== undefined) {
+    gatherStreamFragments(item.output, out);
+  }
+  if (item.reason !== undefined) {
+    gatherStreamFragments(item.reason, out);
+  }
+}
+
+function normalizeStreamText(input: string): string {
+  return input.replace(/\r\n/g, "\n");
+}
+
+function compactStreamLine(input: string, maxChars: number): string {
+  const normalized = normalizeStreamText(input).replace(/\s+/g, " ").trim();
+  if (normalized.length === 0) return "";
+  const chars = Array.from(normalized);
+  if (chars.length <= maxChars) return normalized;
+  return `${chars.slice(0, Math.max(1, maxChars - 1)).join("")}…`;
+}
+
+function currentStreamingItem(stream: readonly StreamingItem[]): StreamingItem | null {
+  for (let i = stream.length - 1; i >= 0; i -= 1) {
+    const item = stream[i];
+    if (item !== undefined && (item.kind === "tool-call" || item.text.trim().length > 0)) return item;
+  }
+  return stream.at(-1) ?? null;
+}
+
+function extractStreamingBlocks(partial: unknown): StreamingItem[] {
+  const blocks = (() => {
+    if (partial === null || typeof partial !== "object") return [];
+    if (Array.isArray((partial as { blocks?: unknown }).blocks)) return (partial as { blocks: unknown[] }).blocks;
+    return [partial];
+  })();
+
+  const stream: StreamingItem[] = [];
+  gatherStreamFragments(blocks, stream);
+  return stream;
+}
+
+function summarizeStreamChars(stream: readonly StreamingItem[]): { text: number; reasoning: number } {
+  let text = 0;
+  let reasoning = 0;
+
+  for (const item of stream) {
+    if (item.kind === "reasoning") reasoning += item.text.length;
+    else if (item.kind === "text") text += item.text.length;
+  }
+
+  return { text, reasoning };
+}
 
 /** Small "?" anchor that explains a metric on hover. */
 function Hint(props: { label: string }): JSX.Element {
@@ -1121,7 +1256,7 @@ function FragmentRow(props: {
 
 /** The dashboard conversation-view entry. */
 export function DashboardView(props: DashboardViewProps): JSX.Element {
-  const { useSession, useProjection, t, actions, sessionId } = props;
+  const { useSession, useProjection, useSessions, t, actions, sessionId } = props;
   // ── 看板自持滚动容器 + 按会话滚动记忆 ──────────────────────────────────
   // 根元素声明 data-conversation-composer-overlay 后，会话列共享滚动体
   // 让位（与轨迹视图同款官方模式），本视图拥有自己的滚动条，切换 tab
@@ -1176,6 +1311,14 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
   const stats = useProjection("sessionStats");
   const context = useProjection("contextBreakdown");
   const pressure = useProjection("contextPressure");
+  // HUD: goal / todos / board projections + the subagent catalog of this
+  // session (the same data the board view renders, condensed into one strip).
+  const goal = useProjection("goal");
+  const todos = useProjection("todos");
+  const board = useProjection("boardState");
+  const catalogs = useSessions((s) => s.subagentsByParent);
+  const subagents = childEntries(catalogs[sessionId]?.entries as readonly SubagentEntryLike[] | undefined);
+  const hud = useHudData({ running, runningCalls, goal, todos, board, subagentEntries: subagents });
 
   const metrics = useMemo(
     () =>
@@ -1261,7 +1404,9 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             {running ? t("status.running") : t("status.idle")}
           </span>
         </div>
+        <HudStrip data={hud} t={t} />
         <div className="dshd-empty">{t("empty")}</div>
+        <BoardBody {...props} />
       </div>
     );
   }
@@ -1320,19 +1465,13 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   const windowNote = `${t("role.windowNote")}${hasMore ? t("windowNote.more") : ""}`;
 
-  // Streamed chars split by block kind (text vs reasoning).
-  const streamed = (() => {
-    if (partial === null) return { text: 0, reasoning: 0 };
-    let text = 0;
-    let reasoning = 0;
-    for (const b of partial.blocks) {
-      if (!("text" in b) || typeof b.text !== "string") continue;
-      if (b.kind === "reasoning") reasoning += b.text.length;
-      else if (b.kind === "text") text += b.text.length;
-    }
-    return { text, reasoning };
-  })();
-  const streamingChars = streamed.text + streamed.reasoning;
+  const streamingBlocks = useMemo(() => extractStreamingBlocks(partial), [partial]);
+  const streamed = useMemo(() => summarizeStreamChars(streamingBlocks), [streamingBlocks]);
+  const liveItem = useMemo(() => currentStreamingItem(streamingBlocks), [streamingBlocks]);
+  const livePreview = useMemo(
+    () => compactStreamLine(liveItem?.text ?? "", STREAM_MAX_CHARS),
+    [liveItem]
+  );
   const nowMs = Date.now();
   // Health signals: running requests that have been silent too long.
   const stuckRequests = metrics.series
@@ -1372,51 +1511,70 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   return (
     <div ref={bindRoot} className="dshd-root" data-conversation-composer-overlay="">
-      <div className="dshd-header">
-        <div className="dshd-title">
-          <span>{t("view.dashboard")}</span>
+      <div className="dshd-dashboardHead">
+        <div className="dshd-header">
+          <div className="dshd-title">
+            <span>{t("view.dashboard")}</span>
+          </div>
+          <span className="dshd-live" data-off={running ? undefined : true}>
+            <span className="dshd-liveDot" />
+            {running ? t("status.running") : t("status.idle")}
+          </span>
+          {model !== null ? <span className="dshd-chip" title={model}>{model}</span> : null}
+          {metrics.modelSwitchCount > 0 ? (
+            <span className="dshd-chip" title={t("hint.modelSwitches")}>{t("stat.modelSwitches")} ×{metrics.modelSwitchCount}</span>
+          ) : null}
+          <span className="dshd-spacer" />
+          <span className="dshd-muted" style={{ fontSize: 11 }}>{windowNote}</span>
         </div>
-        <span className="dshd-live" data-off={running ? undefined : true}>
-          <span className="dshd-liveDot" />
-          {running ? t("status.running") : t("status.idle")}
-        </span>
-        {model !== null ? <span className="dshd-chip" title={model}>{model}</span> : null}
-        {metrics.modelSwitchCount > 0 ? (
-          <span className="dshd-chip" title={t("hint.modelSwitches")}>{t("stat.modelSwitches")} ×{metrics.modelSwitchCount}</span>
-        ) : null}
-        <span className="dshd-spacer" />
-        <span className="dshd-muted" style={{ fontSize: 11 }}>{windowNote}</span>
-      </div>
-      <div className="dshd-summary" role="complementary" aria-label={t("section.summary")}>
-        {summary.map((s) => (
-          <span key={s.label} className="dshd-summaryItem" title={s.label}>
-            <span className="dshd-summaryLabel">{s.label}</span>
-            <span className="dshd-summaryValue">{s.value}</span>
-          </span>
-        ))}
-      </div>
-      {running ? (
-        <div className="dshd-streamRow">
-          <span className="dshd-streamDot" />
-          <span className="dshd-streamText">
-            {t("status.streaming")}
-            {streamed.text > 0 ? ` ${exactNumber(streamed.text)} ${t("unit.char")}` : ""}
-            {streamed.reasoning > 0 ? ` · ${t("tokens.reasoning")} ${exactNumber(streamed.reasoning)} ${t("unit.char")}` : ""}
-          </span>
-          {stuckRequests.map((x) => (
-            <span key={`stuck${x.seq}`} className="dshd-streamWarn">
-              <span role="alert">{t("status.stuckAlert").replace("{n}", String(x.seq))}</span>
-              {t("status.stuckTimer").replace("{s}", formatMs(x.elapsed))}
+        <div className="dshd-summary" role="complementary" aria-label={t("section.summary")}>
+          {summary.map((s) => (
+            <span key={s.label} className="dshd-summaryItem" title={s.label}>
+              <span className="dshd-summaryLabel">{s.label}</span>
+              <span className="dshd-summaryValue">{s.value}</span>
             </span>
           ))}
-          {runningCalls.map((c) => {
-            const elapsed = Math.max(0, nowMs - c.time);
-            return (
-              <span key={c.callId} className={`dshd-streamTool${elapsed > stuckToolMs ? " dshd-streamWarn" : ""}`}>
-                {t("status.tool")} {c.name} · {formatMs(elapsed)}
+        </div>
+      </div>
+      <HudStrip data={hud} t={t} />
+      {running ? (
+        <div className="dshd-streamRow" role="status" aria-live="polite">
+          <span className="dshd-streamDot" />
+          <div className="dshd-streamBody">
+            <div className="dshd-streamHead">
+              <span className="dshd-streamText">
+                {t("status.streaming")}
+                {streamed.text > 0 ? ` ${exactNumber(streamed.text)} ${t("unit.char")}` : ""}
+                {streamed.reasoning > 0 ? ` · ${t("tokens.reasoning")} ${exactNumber(streamed.reasoning)} ${t("unit.char")}` : ""}
               </span>
-            );
-          })}
+              {stuckRequests[0] !== undefined ? (
+                <span className="dshd-streamWarn">
+                  <span role="alert">{t("status.stuckAlert").replace("{n}", String(stuckRequests[0].seq))}</span>
+                  {t("status.stuckTimer").replace("{s}", formatMs(stuckRequests[0].elapsed))}
+                </span>
+              ) : null}
+              {runningCalls.at(-1) !== undefined ? (() => {
+                const call = runningCalls.at(-1)!;
+                const elapsed = Math.max(0, nowMs - call.time);
+                return (
+                  <span className={`dshd-streamTool${elapsed > stuckToolMs ? " dshd-streamWarn" : ""}`}>
+                    {t("status.tool")} {call.name} · {formatMs(elapsed)}{runningCalls.length > 1 ? ` +${runningCalls.length - 1}` : ""}
+                  </span>
+                );
+              })() : null}
+            </div>
+            <div className="dshd-streamLine" data-kind={liveItem?.kind ?? "empty"} aria-label={t("stream.liveOutput")} title={liveItem?.text || undefined}>
+              <span className="dshd-streamMarker" aria-hidden="true">
+                {liveItem?.kind === "reasoning" ? "Think" : liveItem?.kind === "text" ? "Output" : liveItem?.kind === "tool-call" ? "Tool" : "Live"}
+              </span>
+              <span className="dshd-streamSegmentLabel">
+                {liveItem?.kind === "reasoning" ? t("stream.think") : liveItem?.kind === "text" ? t("stream.output") : liveItem?.kind === "tool-call" ? (liveItem.name || t("status.tool")) : t("stream.liveOutput")}
+              </span>
+              <span className="dshd-streamLineText">
+                {livePreview || (liveItem?.kind === "reasoning" ? t("stream.onlyReasoning") : t("stream.fallback"))}
+              </span>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1871,6 +2029,9 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         </div>
         <TrendSection metrics={metrics} t={t} actions={actions} jumpTo={jumpTo} />
       </section>
+
+      {/* Subagent status: direct-child catalog folded from the session runtime. */}
+      <BoardBody {...props} />
     </div>
   );
 }

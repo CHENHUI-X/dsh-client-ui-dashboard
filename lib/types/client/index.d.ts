@@ -1,9 +1,9 @@
 /**
  * Browser dashboard plugin: contributes one `conversation.view` tab —
  * "看板 / Dashboard". The tab renders live session metrics, the HUD strip
- * (what is running right now) and the closed-loop activity board (goal,
- * todos, workflow runs, subagents and reminders) in a single scroll view —
- * the board is the DashboardView's bottom section, not a separate tab.
+ * (what is running right now) and the direct-child subagent status panel in a
+ * single scroll view — the panel is the DashboardView's bottom section, not a
+ * separate tab.
  *
  * The entry registers the tab through the slot service exactly like the
  * shipped conversation/trajectory plugins: `slots.inject("conversation.view",
@@ -18,11 +18,11 @@
  * it switch the active view and issue the one-shot `inspect` handoff
  * (trajectory linkage) exactly like the chat view's own "inspect" action.
  */
-import type { Context } from "@deepseek-ai/cordis";
+import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 /** Required client services (the cordis fiber service gate). */
 export declare const inject: string[];
 /**
  * Client plugin body: register the dashboard view tab.
  * @param ctx - client root context.
  */
-export declare function apply(ctx: Context): void;
+export declare function apply(ctx: ClientContext): void;

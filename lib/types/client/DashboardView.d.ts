@@ -1,6 +1,7 @@
 import type { ConvViewProps } from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type { PropsLocale, SnapshotSelectorHook } from "@deepseek-ai/dsh-client-ui-slots";
 import type { NS } from "./locales";
+import type { BoardNavigation } from "./BoardView";
 /** The shared conversation store's action surface (structural subset). */
 interface SharedChatActions {
     select(target: {
@@ -18,7 +19,7 @@ interface SharedChatActions {
 export type DashboardViewProps = ConvViewProps & PropsLocale<typeof NS> & {
     useStore?: SnapshotSelectorHook<unknown>;
     actions?: SharedChatActions;
-};
+} & BoardNavigation;
 /** The dashboard conversation-view entry. */
 export declare function DashboardView(props: DashboardViewProps): JSX.Element;
 export {};

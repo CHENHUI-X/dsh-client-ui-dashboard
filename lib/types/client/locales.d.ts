@@ -225,6 +225,13 @@ export declare const zh: {
     readonly "req.runningElapsed": "已用";
     readonly "req.toolTail": "等 {n} 个";
     readonly "status.streaming": "正在生成";
+    readonly "stream.liveOutput": "正在生成内容";
+    readonly "stream.think": "思维过程";
+    readonly "stream.output": "文本输出";
+    readonly "stream.detail": "过程数据";
+    readonly "stream.reasoningOutput": "正在生成思维过程";
+    readonly "stream.onlyReasoning": "当前阶段为思维过程，文本输出尚未开始";
+    readonly "stream.fallback": "当前流尚未产出可见文本";
     readonly "status.tool": "工具";
     readonly "status.stuck": "请求 #{n} 已 {s} 未出首字";
     readonly "unit.char": "字符";
@@ -236,7 +243,7 @@ export declare const zh: {
     readonly "context.pressureMissing": "provider 未上报压力数据,暂无占用估算";
     readonly "hint.modelSwitches": "会话过程中模型切换的次数(相邻请求模型不同)。";
     readonly "hint.compactionRecovered": "压缩替模型省掉的 tokens(provider 上报的 shadowed 值,缺失时留空)。";
-    readonly "board.section": "活动看板";
+    readonly "board.section": "子代理状态";
     readonly "hud.status": "状态";
     readonly "hud.status.running": "运行中";
     readonly "hud.status.idle": "空闲";
@@ -257,7 +264,6 @@ export declare const zh: {
     readonly "board.goal.phase.paused": "已暂停";
     readonly "board.goal.phase.complete": "已完成";
     readonly "board.goal.phase.blocked": "已阻塞";
-    readonly "board.goal.phase.cleared": "已清除";
     readonly "board.goal.rounds": "第 {n}/{m} 轮";
     readonly "board.goal.blockedReason": "原因: {message}";
     readonly "board.todo.status.pending": "待办";
@@ -273,15 +279,21 @@ export declare const zh: {
     readonly "board.workflow.stop.cancelled": "已取消";
     readonly "board.workflow.stop.error": "出错";
     readonly "board.subagents.running": "运行中";
-    readonly "board.subagents.inactive": "空闲";
+    readonly "board.subagents.completed": "已完成";
+    readonly "board.subagents.inactive": "已结束";
+    readonly "board.subagents.inactiveNote": "目录未提供完成/停止原因";
+    readonly "board.subagents.listTitle": "子代理列表";
+    readonly "board.subagents.count": "共 {n} 个";
+    readonly "board.subagents.open": "打开对话";
+    readonly "board.subagents.openAria": "打开 {name} 的对话";
     readonly "board.subagent.mode.oneShot": "一次性";
     readonly "board.subagent.mode.continuable": "可继续";
     readonly "board.schedule.overdue": "已到期";
     readonly "board.schedule.dispatched": "已触发";
     readonly "board.schedule.due": "于 {time}";
     readonly "board.schedule.every": "每 {s}s";
-    readonly "board.empty": "会话还没有活动 —— 发起目标、任务、工作流或提醒后,它们会自动出现在这里。";
-    readonly "board.hint": "看板由会话日志自动驱动:goal / todo / workflow / schedule / subagent 事件自动上板,无需手动维护。";
+    readonly "board.empty": "当前会话暂无子代理。启动子代理后，状态会自动显示在这里。";
+    readonly "board.hint": "状态来自 dsh 子代理目录：运行中 / 已完成 / 已结束。目录不会把已结束细分为完成或停止。";
 };
 /** English dictionary, checked complete against the zh key set. */
 export declare const en: Record<keyof typeof zh, string>;

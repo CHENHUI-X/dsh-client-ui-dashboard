@@ -12,16 +12,20 @@ export interface SubagentEntryLike {
     mode?: "one-shot" | "continuable";
     activity?: "running" | "inactive";
 }
-/** Structural subset of a session summary (for subagent display titles). */
+/** Structural subset of a session summary used to refine subagent display state. */
 export interface SessionSummaryLike {
     title?: string;
+    displayTitle?: string;
+    running?: boolean;
+    /** The runtime exposes this only as a transient done reminder. */
+    completed?: boolean;
 }
 /** Whether a reminder is past its target; overdue is derived, never folded. */
 export declare function isOverdue(item: BoardScheduleItem, nowMs: number): boolean;
 /** Reminders still pending delivery, soonest target first. */
-export declare function scheduledItems(board: BoardProjection, nowMs: number): BoardScheduleItem[];
-/** The next reminder to fire, or null. */
-export declare function nextSchedule(board: BoardProjection, nowMs: number): BoardScheduleItem | null;
+export declare function scheduledItems(board: BoardProjection): BoardScheduleItem[];
+/** The next reminder to fire (soonest pending), or null. */
+export declare function nextSchedule(board: BoardProjection): BoardScheduleItem | null;
 /** Live workflow runs (newest first). */
 export declare function runningRuns(board: BoardProjection): BoardWorkflowRun[];
 /** Settled workflow runs (newest first). */

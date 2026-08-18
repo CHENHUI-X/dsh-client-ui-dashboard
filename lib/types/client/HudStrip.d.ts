@@ -26,6 +26,8 @@ export interface HudData {
     runningWorkflow: number;
     runningSubagents: number;
     nextSchedule: BoardScheduleItem | null;
+    /** True when `nextSchedule` has passed its target and is still pending. */
+    nextScheduleOverdue: boolean;
 }
 /** Derive the HUD payload from framework data (pure, memoized). */
 export declare function useHudData(input: HudInput): HudData;
@@ -33,9 +35,10 @@ export declare function useHudData(input: HudInput): HudData;
 export declare function goalPhaseLabel(t: (key: DashboardLocaleKey) => string, phase: string): string;
 /** Compact goal chip value: "objective (第n/m轮)" with the objective clipped. */
 export declare function goalShortLabel(t: (key: DashboardLocaleKey) => string, goal: GoalProjection): string;
-/** Format a schedule target for display: local HH:MM or the literal target. */
+/** Format a schedule target for display: local HH:MM, with a date prefix
+ *  (M/D) when the target is not today. */
 export declare function scheduleDueLabel(item: BoardScheduleItem): string;
-/** Elapsed seconds for a running tool call. */
+/** Elapsed time for a running tool call ("5s", "2m3s", "1h2m"). */
 export declare function elapsedLabel(time: number, nowMs: number): string;
 /** The HUD strip. `t` is the view's bound locale function. */
 export declare function HudStrip(props: {

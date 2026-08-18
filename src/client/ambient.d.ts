@@ -12,10 +12,9 @@ import type {} from "@deepseek-ai/dsh-client-locale/client";
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type {} from "@deepseek-ai/dsh-token-meter/client";
 import type {} from "@deepseek-ai/dsh-session-stats/client";
-import type { zh } from "./locales";
 
-/** This plugin's locale dictionary key union. */
-export type DashboardLocaleKey = keyof typeof zh;
+/** This plugin's locale dictionary key union (single source: locales.ts). */
+export type { DashboardLocaleKey } from "./locales";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface LocaleNamespaceMap {

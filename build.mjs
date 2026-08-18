@@ -66,6 +66,9 @@ ${indented}
 await writeFile(join(lib, "client.js"), clientBundle);
 
 // ── 2. host half: plain ESM ────────────────────────────────────────────────
+// `@deepseek-ai/*` and `zod` stay external: the web process resolves them from
+// its own module table, so cordis service identity (ctx.tools, projection
+// schemas) is never duplicated by an inlined copy.
 await build({
   entryPoints: [join(root, "src/index.ts")],
   outfile: join(lib, "index.js"),
@@ -73,6 +76,7 @@ await build({
   format: "esm",
   platform: "node",
   target: "es2022",
+  external: ["@deepseek-ai/*", "zod"],
   logLevel: "warning"
 });
 
