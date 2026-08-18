@@ -283,8 +283,13 @@ export const zh = {
   "board.subagents.completed": "已完成",
   "board.subagents.inactive": "已结束",
   "board.subagents.inactiveNote": "目录未提供完成/停止原因",
+  "board.subagents.archived": "归档",
+  "board.subagents.expand": "展开",
+  "board.subagents.collapse": "收起",
+  "board.subagents.archiveAria": "{action}归档子代理，共 {n} 个",
   "board.subagents.listTitle": "子代理列表",
   "board.subagents.count": "共 {n} 个",
+  "board.subagents.runningEmpty": "当前没有运行中的子代理。",
   "board.subagents.open": "打开对话",
   "board.subagents.openAria": "打开 {name} 的对话",
   "board.subagent.mode.oneShot": "一次性",
@@ -294,7 +299,7 @@ export const zh = {
   "board.schedule.due": "于 {time}",
   "board.schedule.every": "每 {s}s",
   "board.empty": "当前会话暂无子代理。启动子代理后，状态会自动显示在这里。",
-  "board.hint": "状态来自 dsh 子代理目录：运行中 / 已完成 / 已结束。目录不会把已结束细分为完成或停止。"
+  "board.hint": "状态来自 dsh 子代理目录。已结束超过 5 分钟的子代理自动归档，归档默认折叠。目录不会把已结束细分为完成或停止。"
 } as const;
 
 /** English dictionary, checked complete against the zh key set. */
@@ -576,8 +581,13 @@ export const en: Record<keyof typeof zh, string> = {
   "board.subagents.completed": "Completed",
   "board.subagents.inactive": "Ended",
   "board.subagents.inactiveNote": "The catalog has no completion/stop reason",
+  "board.subagents.archived": "Archived",
+  "board.subagents.expand": "Expand",
+  "board.subagents.collapse": "Collapse",
+  "board.subagents.archiveAria": "{action} archived subagents, {n} total",
   "board.subagents.listTitle": "Subagent list",
   "board.subagents.count": "{n} total",
+  "board.subagents.runningEmpty": "No subagents are currently running.",
   "board.subagents.open": "Open conversation",
   "board.subagents.openAria": "Open {name} conversation",
   "board.subagent.mode.oneShot": "one-shot",
@@ -587,5 +597,5 @@ export const en: Record<keyof typeof zh, string> = {
   "board.schedule.due": "at {time}",
   "board.schedule.every": "every {s}s",
   "board.empty": "No subagents in this session yet. Start one and its status will appear here automatically.",
-  "board.hint": "Status comes from the dsh subagent catalog: running / completed / ended. Ended entries are not split into completed versus stopped."
+  "board.hint": "Status comes from the DSH subagent catalog. Subagents ended for more than five minutes are archived automatically, and the archive is collapsed by default. Ended entries are not split into completed versus stopped."
 };

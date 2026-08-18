@@ -6,9 +6,11 @@
  * subagent catalog is the authoritative source for this section, so every
  * card now represents one child and one observable lifecycle state.
  */
+import { useEffect, useState } from "react";
 import type { ConvViewProps } from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SubagentAddress } from "@deepseek-ai/dsh-client-runtime/client";
+import { IconChevronDownOutline14, IconChevronRightOutline14 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { NS, DashboardLocaleKey } from "./locales";
 import { childEntries } from "./board";
 import type { SessionSummaryLike, SubagentEntryLike } from "./board";
@@ -29,6 +31,8 @@ export interface BoardNavigation {
 }
 
 type SubagentState = "running" | "completed" | "inactive";
+const ARCHIVE_AFTER_MS = 5 * 60 * 1_000;
+const ARCHIVE_CLOCK_MS = 15_000;
 
 function summaryOf(
   summaries: Readonly<Record<string, unknown>>,
@@ -48,6 +52,27 @@ function subagentState(entry: SubagentEntryLike, summary: SessionSummaryLike | u
 function summaryTitle(summary: SessionSummaryLike | undefined): string | undefined {
   const title = summary?.title ?? summary?.displayTitle;
   return typeof title === "string" && title.length > 0 ? title : undefined;
+}
+
+function finiteTime(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * DSH does not expose a standalone endedAt value. For an interrupted turn the
+ * timing watermark is the closest durable boundary; for a clean turn, the
+ * latest session activity plus accumulated active duration is the best
+ * available end estimate. Missing timing fails open and keeps the row visible.
+ */
+function estimatedEndAt(summary: SessionSummaryLike | undefined): number | undefined {
+  if (summary === undefined) return undefined;
+  const updatedAt = finiteTime(summary.updatedAt);
+  const timing = summary.projectionValues?.subagentTiming;
+  const through = finiteTime(timing?.active?.through);
+  if (through !== undefined) return through;
+  if (updatedAt === undefined) return undefined;
+  const settledMs = finiteTime(timing?.settledMs);
+  return settledMs === undefined ? updatedAt : updatedAt + settledMs;
 }
 
 function SubagentCard(props: {
@@ -96,19 +121,53 @@ function SubagentCard(props: {
 /** The board body embedded in the dashboard tab. */
 export function BoardBody(props: BoardBodyProps): JSX.Element {
   const { useSessions, t, sessionId, openSubagent } = props;
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), ARCHIVE_CLOCK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    setArchiveOpen(false);
+    setNow(Date.now());
+  }, [sessionId]);
   const catalogs = useSessions((s) => s.subagentsByParent);
   const summaries = useSessions((s) => s.byId);
   const entries = catalogs[sessionId];
   const subagents = childEntries(entries?.entries as readonly SubagentEntryLike[] | undefined);
   const rows = subagents.map((entry) => {
     const summary = summaryOf(summaries, entry.id);
-    return { entry, summary, state: subagentState(entry, summary) };
+    const state = subagentState(entry, summary);
+    const endedAt = state === "running" ? undefined : estimatedEndAt(summary);
+    const archived = endedAt !== undefined && now - endedAt >= ARCHIVE_AFTER_MS;
+    return { entry, summary, state, endedAt, archived };
   });
   const stateRank: Record<SubagentState, number> = { running: 0, completed: 1, inactive: 2 };
-  const orderedRows = [...rows].sort((a, b) => stateRank[a.state] - stateRank[b.state]);
-  const runningCount = rows.filter((row) => row.state === "running").length;
-  const completedCount = rows.filter((row) => row.state === "completed").length;
-  const inactiveCount = rows.filter((row) => row.state === "inactive").length;
+  const visibleRows = rows
+    .filter((row) => !row.archived)
+    .sort((a, b) => stateRank[a.state] - stateRank[b.state]);
+  const archivedRows = rows
+    .filter((row) => row.archived)
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
+  const runningCount = visibleRows.filter((row) => row.state === "running").length;
+  const completedCount = visibleRows.filter((row) => row.state === "completed").length;
+  const inactiveCount = visibleRows.filter((row) => row.state === "inactive").length;
+  const archiveCount = archivedRows.length;
+  const archivePanelId = `dshd-subagent-archive-${sessionId}`;
+
+  const card = (row: (typeof rows)[number]): JSX.Element => (
+    <SubagentCard
+      key={row.entry.id}
+      entry={row.entry}
+      summary={row.summary}
+      onOpen={() => openSubagent({
+        parentSessionId: sessionId as SubagentAddress["parentSessionId"],
+        childSessionId: row.entry.id as SubagentAddress["childSessionId"],
+        mode: row.entry.mode === "continuable" ? "continuable" : "one-shot",
+      })}
+      t={t}
+    />
+  );
 
   return (
     <>
@@ -130,30 +189,55 @@ export function BoardBody(props: BoardBodyProps): JSX.Element {
               <span>{t("board.subagents.inactive")}</span>
               <strong>{inactiveCount}</strong>
             </span>
+            <button
+              type="button"
+              className="dshd-subagentStatusStat dshd-subagentArchiveToggle"
+              data-state="archived"
+              data-populated={archiveCount > 0 ? "true" : undefined}
+              aria-expanded={archiveOpen}
+              aria-controls={archivePanelId}
+              aria-label={t("board.subagents.archiveAria")
+                .replace("{action}", archiveOpen ? t("board.subagents.collapse") : t("board.subagents.expand"))
+                .replace("{n}", String(archiveCount))}
+              disabled={archiveCount === 0}
+              onClick={() => setArchiveOpen((open) => !open)}
+            >
+              <span>{t("board.subagents.archived")}</span>
+              <span className="dshd-subagentArchiveMeta">
+                <strong>{archiveCount}</strong>
+                {archiveOpen ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
+              </span>
+            </button>
           </div>
-          <section className="dshd-subagentPanel" aria-label={t("board.subagents.listTitle")}>
-            <div className="dshd-subagentPanelHead">
-              <div>
-                <h3>{t("board.subagents.listTitle")}</h3>
-                <span>{t("board.subagents.count").replace("{n}", String(subagents.length))}</span>
+          {runningCount === 0 ? (
+            <p className="dshd-subagentRunningEmpty">{t("board.subagents.runningEmpty")}</p>
+          ) : null}
+          {visibleRows.length > 0 ? (
+            <section className="dshd-subagentPanel" aria-label={t("board.subagents.listTitle")}>
+              <div className="dshd-subagentPanelHead">
+                <div>
+                  <h3>{t("board.subagents.listTitle")}</h3>
+                  <span>{t("board.subagents.count").replace("{n}", String(visibleRows.length))}</span>
+                </div>
               </div>
-            </div>
-            <div className="dshd-subagentGrid">
-              {orderedRows.map((row) => (
-                <SubagentCard
-                  key={row.entry.id}
-                  entry={row.entry}
-                  summary={row.summary}
-                  onOpen={() => openSubagent({
-                    parentSessionId: sessionId as SubagentAddress["parentSessionId"],
-                    childSessionId: row.entry.id as SubagentAddress["childSessionId"],
-                    mode: row.entry.mode === "continuable" ? "continuable" : "one-shot",
-                  })}
-                  t={t}
-                />
-              ))}
-            </div>
-          </section>
+              <div className="dshd-subagentGrid">{visibleRows.map(card)}</div>
+            </section>
+          ) : null}
+          {archiveOpen && archiveCount > 0 ? (
+            <section
+              id={archivePanelId}
+              className="dshd-subagentPanel dshd-subagentArchivePanel"
+              aria-label={t("board.subagents.archived")}
+            >
+              <div className="dshd-subagentPanelHead">
+                <div>
+                  <h3>{t("board.subagents.archived")}</h3>
+                  <span>{t("board.subagents.count").replace("{n}", String(archiveCount))}</span>
+                </div>
+              </div>
+              <div className="dshd-subagentGrid">{archivedRows.map(card)}</div>
+            </section>
+          ) : null}
         </>
       )}
       <p className="dshd-board-hint">{t("board.hint")}</p>

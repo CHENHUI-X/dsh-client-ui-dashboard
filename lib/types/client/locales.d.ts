@@ -282,8 +282,13 @@ export declare const zh: {
     readonly "board.subagents.completed": "已完成";
     readonly "board.subagents.inactive": "已结束";
     readonly "board.subagents.inactiveNote": "目录未提供完成/停止原因";
+    readonly "board.subagents.archived": "归档";
+    readonly "board.subagents.expand": "展开";
+    readonly "board.subagents.collapse": "收起";
+    readonly "board.subagents.archiveAria": "{action}归档子代理，共 {n} 个";
     readonly "board.subagents.listTitle": "子代理列表";
     readonly "board.subagents.count": "共 {n} 个";
+    readonly "board.subagents.runningEmpty": "当前没有运行中的子代理。";
     readonly "board.subagents.open": "打开对话";
     readonly "board.subagents.openAria": "打开 {name} 的对话";
     readonly "board.subagent.mode.oneShot": "一次性";
@@ -293,7 +298,7 @@ export declare const zh: {
     readonly "board.schedule.due": "于 {time}";
     readonly "board.schedule.every": "每 {s}s";
     readonly "board.empty": "当前会话暂无子代理。启动子代理后，状态会自动显示在这里。";
-    readonly "board.hint": "状态来自 dsh 子代理目录：运行中 / 已完成 / 已结束。目录不会把已结束细分为完成或停止。";
+    readonly "board.hint": "状态来自 dsh 子代理目录。已结束超过 5 分钟的子代理自动归档，归档默认折叠。目录不会把已结束细分为完成或停止。";
 };
 /** English dictionary, checked complete against the zh key set. */
 export declare const en: Record<keyof typeof zh, string>;

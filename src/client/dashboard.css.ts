@@ -490,13 +490,20 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 
 /* Subagent status: one source of truth, with settled children kept out of a
    misleading "planned" bucket. The status text always accompanies the dot. */
-.dshd-subagentStatusBar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.dshd-subagentStatusBar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .dshd-subagentStatusStat{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;padding:8px 10px;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:9px;color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:600}
 .dshd-subagentStatusStat strong{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:19px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary);font-size:10px;font-variant-numeric:tabular-nums}
 .dshd-subagentStatusStat[data-populated]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l1)}
 .dshd-subagentStatusStat[data-state="running"][data-populated] strong{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,var(--dsw-alias-bg-base))}
 .dshd-subagentStatusStat[data-state="completed"][data-populated] strong{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,var(--dsw-alias-bg-base))}
 .dshd-subagentStatusStat[data-state="inactive"][data-populated] strong{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1)}
+.dshd-subagentStatusStat[data-state="archived"][data-populated] strong{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1)}
+.dshd-subagentArchiveToggle{min-height:44px;font:inherit;text-align:left;cursor:pointer;transition:border-color .16s ease,background .16s ease}
+.dshd-subagentArchiveToggle:hover:not(:disabled){border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-interactive-bg-hover)}
+.dshd-subagentArchiveToggle:disabled{cursor:default;opacity:.55}
+.dshd-subagentArchiveToggle:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 72%,transparent);outline-offset:2px}
+.dshd-subagentArchiveMeta{display:inline-flex;align-items:center;gap:5px;flex:none}
+.dshd-subagentArchiveMeta svg{display:block;color:var(--dsw-alias-label-tertiary)}
 .dshd-subagentPanel{display:flex;flex-direction:column;gap:12px;padding:12px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 68%,var(--dsw-alias-bg-base));border:1px solid var(--dsw-alias-border-l2);border-radius:12px}
 .dshd-subagentPanelHead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 2px 9px;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .dshd-subagentPanelHead h3{margin:0;font-size:12px;font-weight:700;color:var(--dsw-alias-label-primary)}
@@ -522,11 +529,14 @@ tr[data-open] .dshd-chevron{transform:rotate(90deg)}
 .dshd-subagentOpen:hover{color:var(--dsw-alias-state-business-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 42%,var(--dsw-alias-border-l1));background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 8%,var(--dsw-alias-bg-base))}
 .dshd-subagentOpen:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 72%,transparent);outline-offset:2px}
 .dshd-subagentEmpty{margin:0;padding:18px 12px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:10px}
+.dshd-subagentRunningEmpty{margin:0;padding:12px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:11px;background:var(--dsw-alias-bg-base);border:1px dashed var(--dsw-alias-border-l2);border-radius:9px}
+.dshd-subagentArchivePanel{background:var(--dsw-alias-bg-layer-1)}
 
 @media (max-width:900px){
   .dshd-root{gap:16px;padding:16px 16px 28px;padding-bottom:calc(28px + var(--dsh-composer-height,0px))}
   .dshd-grid2{grid-template-columns:1fr}
   .dshd-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dshd-subagentStatusBar{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:560px){
   .dshd-header{padding:9px 10px}

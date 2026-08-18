@@ -17,8 +17,19 @@ export interface SessionSummaryLike {
     title?: string;
     displayTitle?: string;
     running?: boolean;
+    /** Latest durable session activity timestamp supplied by the runtime. */
+    updatedAt?: number;
     /** The runtime exposes this only as a transient done reminder. */
     completed?: boolean;
+    projectionValues?: {
+        subagentTiming?: {
+            settledMs?: number;
+            active?: {
+                since?: number;
+                through?: number;
+            };
+        };
+    };
 }
 /** Whether a reminder is past its target; overdue is derived, never folded. */
 export declare function isOverdue(item: BoardScheduleItem, nowMs: number): boolean;
