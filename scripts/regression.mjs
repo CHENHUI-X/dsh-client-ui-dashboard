@@ -71,6 +71,9 @@ test('direct dashboard entry subscribes to requests and renders absent projectio
   assert.match(markup, /dshd-heroValue[^>]*>5</);
   assert.equal((markup.match(/class="dshd-primaryMetric"/g) ?? []).length, 1);
   assert.ok(!markup.includes('dshd-summary'));
+  assert.equal((markup.match(/class="dshd-activitySample"/g) ?? []).length, rows.length);
+  assert.match(markup, /dshd-activitySample" data-status="error"/);
+  assert.match(markup, /性能与成本/);
   assert.ok(!markup.includes('<table'));
   renderToStaticMarkup(<DashboardView {...props} useSession={select => select({ running: true })} />);
   renderToStaticMarkup(<DashboardView {...props} useTrajectory={select => select({ requests: [] })} />);

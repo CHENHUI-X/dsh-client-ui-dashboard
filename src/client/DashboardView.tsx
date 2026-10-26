@@ -6,6 +6,7 @@
  *
  * Request navigation uses the host openView callback and an exact tool-call address.
  */
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tooltip } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ConversationNode, RunningToolCall } from "@deepseek-ai/dsh-client-ui-conversation/client";
@@ -1232,6 +1233,28 @@ function FragmentRow(props: {
   );
 }
 
+/** The loaded request sequence is the session's execution signature, not decorative telemetry. */
+function RequestActivity({ samples, t }: { samples: readonly RequestSample[]; t: DashboardViewProps["t"] }): JSX.Element {
+  const recent = samples.slice(0, 60).reverse();
+  const maxDuration = Math.max(1, ...recent.map((sample) => sample.durationMs ?? 0));
+  const hasDuration = recent.some((sample) => sample.durationMs !== null);
+  if (recent.length === 0) return <div className="dshd-activityEmpty">{t("empty.requests")}</div>;
+  return (
+    <div className="dshd-activity">
+      <div className="dshd-activityCaption"><span>{t("dashboard.activityCaption")}</span><span>{t("dashboard.slowest")} {hasDuration ? formatMs(maxDuration) : t("unknown")}</span></div>
+      <div className="dshd-activityPlot" role="img" aria-label={t("dashboard.activityAria")}>
+        {recent.map((sample) => (
+          <span key={sample.seq} className="dshd-activitySample" data-status={sample.status}
+            title={`#${sample.seq} ${sample.model ?? t("unknown")} / ${sample.durationMs === null ? t("stat.requests.running") : formatMs(sample.durationMs)}`}>
+            <span style={{ height: `${Math.max(8, ((sample.durationMs ?? 0) / maxDuration) * 100)}%` }} />
+          </span>
+        ))}
+      </div>
+      <div className="dshd-activityAxis"><span>{recent[0] === undefined ? t("unknown") : `#${recent[0].seq}`}</span><span>{t("dashboard.activityOrder")}</span><span>{recent.at(-1) === undefined ? t("unknown") : `#${recent.at(-1)!.seq}`}</span></div>
+    </div>
+  );
+}
+
 /** The dashboard conversation-view entry. */
 export function DashboardView(props: DashboardViewProps): JSX.Element {
   const { useSession, useConversation, useTrajectory, useProjection, useSessions, t, openView, sessionId } = props;
@@ -1423,13 +1446,16 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
     <div ref={bindRoot} className="dshd-root" data-conversation-composer-overlay="">
       <header className="dshd-dashboardHead">
         <div className="dshd-header">
-          <span className="dshd-brandMark"><DashboardIcon name="overview" /></span>
+          <span className="dshd-brandMark"><DashboardIcon name="pulse" /></span>
           <div className="dshd-headingGroup">
-            <h1 className="dshd-title">{t("view.dashboard")}</h1>
+            <h1 className="dshd-title">{t("dashboard.title")}</h1>
             <span className="dshd-subtitle">{t("dashboard.subtitle")}</span>
           </div>
           <span className="dshd-spacer" />
-          {model !== null && <span className="dshd-chip" title={model}>{model}</span>}
+          <div className="dshd-headerContext">
+            <span className="dshd-sessionState" data-running={running}><span />{running ? t("hud.status.running") : t("hud.status.idle")}</span>
+            {model !== null && <span className="dshd-modelBadge" title={model}>{model}</span>}
+          </div>
         </div>
         <div className="dshd-navigation" role="group" aria-label={t("dashboard.navigation")}>
           {panels.map((item) => (
@@ -1442,7 +1468,6 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
           ))}
         </div>
       </header>
-      <div className="dshd-scopeNote"><span className="dshd-liveDot" data-running={running} />{running ? t("status.running") : t("status.idle")}<span>·</span>{windowNote}</div>
       <HudStrip data={hud} t={t} />
       {!hasData && panel !== "agents" && <section className="dshd-emptyState"><DashboardIcon name="analysis" /><p>{t("empty")}</p></section>}
       {running ? (
@@ -1487,33 +1512,38 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
       ) : null}
 
       {panel === "overview" && hasData && <>
-      <div className="dshd-sectionIntro"><h2>{t("dashboard.overview")}</h2><span>{metrics.turns} {t("stat.turns")} · {metrics.steps} {t("stat.steps")}</span></div>
-      <section className="dshd-kpiGrid" aria-label={t("section.overview")}>
+      <section className="dshd-sessionOverview" aria-label={t("section.overview")}>
         <div className="dshd-primaryMetric">
-          <div className="dshd-statLabel"><DashboardIcon name="requests" />{t("stat.requests")}<Hint label={t("hint.requests")} /></div>
-          <strong className="dshd-heroValue">{exactNumber(metrics.requestCount)}</strong>
+          <div className="dshd-recordHead">
+            <div><h2>{t("dashboard.activityTitle")}</h2><p>{t("dashboard.activityNote")}</p></div>
+            <div className="dshd-requestTotal"><strong className="dshd-heroValue">{exactNumber(metrics.requestCount)}</strong><span>{t("stat.requests")}</span><Hint label={t("hint.requests")} /></div>
+          </div>
+          <RequestActivity samples={metrics.series} t={t} />
           <div className="dshd-requestBreakdown">
-            <span>{metrics.completedRequests} {t("stat.requests.completed")}</span>
-            <span>{metrics.runningRequests} {t("stat.requests.running")}</span>
-            <button type="button" data-error={metrics.failedRequests > 0} onClick={() => { setRequestFilter(metrics.failedRequests > 0 ? "error" : "all"); setPanel("requests"); }}>{metrics.failedRequests} {t("stat.requests.error")}<DashboardIcon name="arrow" /></button>
+            <span data-state="complete"><i />{metrics.completedRequests} {t("stat.requests.completed")}</span>
+            <span data-state="running"><i />{metrics.runningRequests} {t("stat.requests.running")}</span>
+            <button type="button" data-error={metrics.failedRequests > 0} onClick={() => { setRequestFilter(metrics.failedRequests > 0 ? "error" : "all"); setPanel("requests"); }}><i />{metrics.failedRequests} {t("stat.requests.error")}</button>
+            <button type="button" className="dshd-openRequests" onClick={() => { setRequestFilter("all"); setPanel("requests"); }}>{t("dashboard.inspectRequests")}<DashboardIcon name="arrow" /></button>
           </div>
         </div>
-        <StatCard label={t("stat.cost")} value={fmtCost(metrics.costEstimateUsd.total)} hint={t("hint.cost")}
-          sub={metrics.costEstimateUsd.unpricedRequests > 0 ? t("dashboard.unpriced").replace("{n}", String(metrics.costEstimateUsd.unpricedRequests)) : t("dashboard.costNote")} />
-        <StatCard label={t("stat.avgTtft")} value={metrics.avgTtftMs === null ? t("unknown") : formatMs(metrics.avgTtftMs)} hint={t("hint.avgTtft")}
-          sub={t("dashboard.latencyNote")} />
-        <StatCard label={t("stat.decodeSpeed")} value={metrics.decodeTokensPerSec === null ? t("unknown") : `${Math.round(metrics.decodeTokensPerSec)} ${t("unit.tps")}`} hint={t("hint.decodeSpeed")}
-          sub={t("dashboard.speedNote")} />
+        <aside className="dshd-sessionLedger" aria-label={t("dashboard.performance")}>
+          <div className="dshd-ledgerHead"><DashboardIcon name="analysis" />{t("dashboard.performance")}</div>
+          <StatCard label={t("stat.avgTtft")} value={metrics.avgTtftMs === null ? t("unknown") : formatMs(metrics.avgTtftMs)} hint={t("hint.avgTtft")} />
+          <StatCard label={t("stat.decodeSpeed")} value={metrics.decodeTokensPerSec === null ? t("unknown") : `${Math.round(metrics.decodeTokensPerSec)} ${t("unit.tps")}`} hint={t("hint.decodeSpeed")} />
+          <StatCard label={t("stat.cost")} value={fmtCost(metrics.costEstimateUsd.total)} hint={t("hint.cost")}
+            sub={metrics.costEstimateUsd.unpricedRequests > 0 ? t("dashboard.unpriced").replace("{n}", String(metrics.costEstimateUsd.unpricedRequests)) : t("dashboard.costNote")} />
+        </aside>
+        <footer className="dshd-sessionFootnote"><span>{windowNote}</span><span>{metrics.turns} {t("stat.turns")}<b>/</b>{metrics.steps} {t("stat.steps")}</span></footer>
       </section>
       {/* Token usage */}
-      <section className="dshd-card">
+      <section className="dshd-card dshd-tokenPanel">
         <div className="dshd-cardHead">
-          <span className="dshd-cardTitle">{t("section.tokens")}</span>
+          <DashboardIcon name="layers" /><span className="dshd-cardTitle">{t("section.tokens")}</span>
           <Hint label={`${t("tokens.formula")} · ${t("tokens.cacheNote")}`} />
         </div>
         <div className="dshd-tokenStats">
           <StatCard label={t("stat.inputTokens")} value={exactNumber(metrics.inputTokens)} hint={t("hint.inputTokens")} />
-          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} sub={metrics.reasoningTokens > 0 ? `${t("tokens.reasoning")} ${compactNumber(metrics.reasoningTokens)} (${t("role.windowNote")})` : undefined} />
+          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} />
           {metrics.reasoningTokens > 0 && <StatCard
             label={t("stat.reasoningTokens")}
             value={exactNumber(metrics.reasoningTokens)}
@@ -1521,7 +1551,10 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             sub={metrics.windowOutputTokens > 0 ? `${t("stat.reasoningShare")} ${Math.round((metrics.reasoningTokens / metrics.windowOutputTokens) * 100)}% (${t("role.windowNote")})` : undefined}
             tone="reasoning"
           />}
-          <StatCard label={t("stat.cacheHitRate")} value={metrics.cacheHitPercent === null ? t("unknown") : `${metrics.cacheHitPercent}${t("unit.percent")}`} hint={t("hint.cacheHitRate")} sub={metrics.cacheHitPercent === null ? undefined : `${t("stat.cacheRead")} ${compactNumber(metrics.cacheReadTokens)} / ${t("stat.inputTokens")} ${compactNumber(metrics.inputTokens)}`} />
+          <div className="dshd-cacheMetric">
+            <span className="dshd-cacheRing" style={{ "--dshd-cache-angle": `${(metrics.cacheHitPercent ?? 0) * 3.6}deg` } as CSSProperties} aria-hidden="true" />
+            <StatCard label={t("stat.cacheHitRate")} value={metrics.cacheHitPercent === null ? t("unknown") : `${metrics.cacheHitPercent}%`} hint={t("hint.cacheHitRate")} />
+          </div>
         </div>
         <StackedBar data={tokenData} valueFormatter={(v) => exactNumber(v)} height={20} totalLabel={t("total")} />
       </section>
@@ -1530,7 +1563,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         {/* Context pressure gauge + composition */}
         <section className="dshd-card">
           <div className="dshd-cardHead">
-            <span className="dshd-cardTitle">{t("stat.contextOccupancy")}</span>
+            <DashboardIcon name="context" /><span className="dshd-cardTitle">{t("stat.contextOccupancy")}</span>
             <Hint label={t("hint.contextOccupancy")} />
           </div>
           {metrics.pressure?.projectedTokens === undefined || metrics.pressure.contextWindow === undefined ? (
@@ -1561,7 +1594,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         {/* Timing */}
         <section className="dshd-card">
           <div className="dshd-cardHead">
-            <span className="dshd-cardTitle">{t("section.timing")}</span>
+            <DashboardIcon name="clock" /><span className="dshd-cardTitle">{t("section.timing")}</span>
             <span className="dshd-cardHint">{t("stat.scopeAll")}</span>
           </div>
           <StackedBar
@@ -1632,7 +1665,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
       </div>
       </>}
       {panel === "analysis" && hasData && <>
-      <div className="dshd-sectionIntro"><h2>{t("dashboard.analysis")}</h2><span>{t("dashboard.analysisNote")}</span></div>
+      <div className="dshd-sectionIntro"><h2>{t("dashboard.analysis")}</h2><span>{windowNote}</span></div>
       <div className="dshd-grid2 dshd-analysisGrid">
         <div className="dshd-col">
         {/* Turn durations */}
@@ -1906,7 +1939,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
       {panel === "requests" && hasData && <section className="dshd-card dshd-requestCard">
         <div className="dshd-cardHead">
           <span className="dshd-cardTitle">{t("section.requests")}</span>
-          <span className="dshd-cardHint">{t("req.rowHint.expand")}</span>
+          <span className="dshd-cardHint">{windowNote}</span><Hint label={t("req.rowHint.expand")} />
         </div>
         <TrendSection metrics={metrics} t={t} onJump={jumpTo} jumpTo={jumpTo} initialFilter={requestFilter} />
       </section>}

@@ -6,6 +6,16 @@ export type DashboardLocaleKey = keyof typeof zh;
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
+  "dashboard.title": "会话观测",
+  "dashboard.activityTitle": "请求运行记录",
+  "dashboard.activityNote": "定位失败、等待与响应波动",
+  "dashboard.activityCaption": "最近请求耗时",
+  "dashboard.slowest": "最长",
+  "dashboard.activityOrder": "按请求顺序排列",
+  "dashboard.activityAria": "最近 60 条请求，柱高表示耗时，红色表示失败",
+  "dashboard.inspectRequests": "查看请求",
+  "dashboard.performance": "性能与成本",
+
   "dashboard.subtitle": "当前会话的运行、用量与请求洞察",
   "dashboard.navigation": "看板分区",
   "dashboard.overview": "会话概览",
@@ -319,6 +329,16 @@ export const zh = {
 
 /** English dictionary, checked complete against the zh key set. */
 export const en: Record<keyof typeof zh, string> = {
+  "dashboard.title": "Session observatory",
+  "dashboard.activityTitle": "Request activity",
+  "dashboard.activityNote": "Find failures, waits and response changes",
+  "dashboard.activityCaption": "Recent request durations",
+  "dashboard.slowest": "Longest",
+  "dashboard.activityOrder": "In request order",
+  "dashboard.activityAria": "Latest 60 requests. Bar height shows duration; red marks failures.",
+  "dashboard.inspectRequests": "Inspect requests",
+  "dashboard.performance": "Performance & cost",
+
   "dashboard.subtitle": "Live activity, usage and request insights",
   "dashboard.navigation": "Dashboard sections",
   "dashboard.overview": "Overview",

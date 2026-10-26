@@ -4,6 +4,15 @@ export declare const NS = "dashboard";
 export type DashboardLocaleKey = keyof typeof zh;
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export declare const zh: {
+    readonly "dashboard.title": "会话观测";
+    readonly "dashboard.activityTitle": "请求运行记录";
+    readonly "dashboard.activityNote": "定位失败、等待与响应波动";
+    readonly "dashboard.activityCaption": "最近请求耗时";
+    readonly "dashboard.slowest": "最长";
+    readonly "dashboard.activityOrder": "按请求顺序排列";
+    readonly "dashboard.activityAria": "最近 60 条请求，柱高表示耗时，红色表示失败";
+    readonly "dashboard.inspectRequests": "查看请求";
+    readonly "dashboard.performance": "性能与成本";
     readonly "dashboard.subtitle": "当前会话的运行、用量与请求洞察";
     readonly "dashboard.navigation": "看板分区";
     readonly "dashboard.overview": "会话概览";
