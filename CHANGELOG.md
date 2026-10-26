@@ -2,13 +2,21 @@
 
 ## 0.4.0 — 2026-10-26
 
-- Support dsh 0.2.1-rc.3 Session/Conversation snapshots, lazy Trajectory subscriptions, Workspace child navigation and the state/wire projection contract.
-- Pin published development contracts and Zod to the host versions; remove sibling-checkout dependency links and the projection type escape.
-- Replace duplicated summary grids with Overview, Usage & performance, Requests and Agents sections. Use host-aware tokens, stroke icons, container layouts and quiet interactions.
-- Move request trends behind disclosure, replace role donuts with labelled bars, distinguish data series from alerts and remove unused kanban CSS.
-- Preserve unknown prices and missing projections, repair compaction filtering, and keep elapsed timings current without leaking interval handles.
-- Add three focused migration/render regression checks and update installation/data semantics documentation.
+### 兼容性
+- 适配 dsh 0.2.1-rc.3 的 Session/Conversation 快照、按需启用的 Trajectory 订阅、子会话导航和 state/wire 投影协议；最低要求 dsh 0.2.1-rc.3 及同版本 Web 内置插件。
+- 开发依赖固定到已发布的宿主契约，Zod 与宿主保持一致，移除对相邻源码仓库旧构建产物的依赖。
 
+### 界面与交互
+- 重做会话概览：真实请求耗时序列、状态和失败入口、性能与成本摘要，取消重复指标。
+- 重做“用量与性能”：紧凑导航、完整的耗时分析主区、轻量模型用量侧栏，辅助统计合并为无边框信息带，诊断按需展开。
+- 工具按累计耗时排序，合并次数、耗时与错误信息，明确标注包含用户等待的调用；亚秒级耗时显示毫秒。
+- 看板与输入框独立占位，输入框增高时同步调整可读区域，修复悬浮输入框遮挡统计内容的问题。
+- 保留中英文、明暗主题、窄屏布局与键盘焦点；请求趋势默认折叠，失败请求可直接筛选。
+
+### 数据与稳定性
+- 直接进入看板即可订阅请求记录，无需先打开轨迹；修复压缩请求筛选和目标投影尚未到达时的渲染边界。
+- 第三方路由、未知模型或缺失用量保持未计价；耗时统计标明窗口与累计口径，不把交互等待当作纯执行时长。
+- 新增请求适配、投影/子会话目录和渲染回归检查，覆盖工具耗时排序、缺失数据与毫秒显示。
 
 ## 0.2.5 (2026-08-18)
 

@@ -13,11 +13,11 @@ A live conversation dashboard for [DeepSeek Harness](https://github.com/deepseek
 | Requests | Status filters, search, pagination, grouped views, expandable details and filtered JSON export; trends expand on demand |
 | Agents | Direct child sessions, live status, navigation and collapsed archive |
 
-Uses the host accent and light/dark theme, consistent stroke icons and tabular figures. A single primary request metric replaces repeated summary cards. Container queries adapt to the conversation pane; tables scroll horizontally. Keyboard focus and reduced-motion preferences are supported.
+Uses the host accent and light/dark theme, consistent stroke icons and tabular figures. Overview shows real request-duration activity. Performance pairs a cumulative timing analysis with a quiet model ledger; tools sort by duration and interactive waits are labelled. Turns, message roles and context sources form an unboxed support band, with diagnostics on demand. The dashboard reserves a separate composer area, including when the input grows. Container queries, horizontally scrolling tables, visible keyboard focus and reduced motion are supported.
 
 ## Data semantics
 
-Whole-log projections supply cumulative turns, steps, usage and timing. Request and tool records, message roles and diagnostics cover the currently loaded window. The header identifies partial history. Missing data is shown as `—`.
+Whole-log projections supply cumulative turns, steps, usage and timing. Request and tool records, message roles and diagnostics cover the currently loaded window. The header identifies partial history. Missing data is shown as `—`. Performance tool totals include only linked timing samples, including interactive waits and parallel calls; they are not session elapsed time.
 
 The official `useTrajectory` subscription activates the lazy target, so opening Dashboard directly includes request records. Input includes three disjoint buckets: uncached input, cache reads and cache writes. Reasoning may already be part of output and is not added twice.
 
@@ -25,7 +25,16 @@ Cost uses [official DeepSeek peak rates](https://api-docs.deepseek.com/quick_sta
 
 Failed rows expand locally. Requests with a tool-call address can open the host trajectory through `openView`; otherwise navigation is disabled and local details remain available. Child-session inactivity is not interpreted as success. Archive timing is an estimate, with settled entries moved to a collapsed archive after five minutes.
 
-## Local installation
+## Install or upgrade from npm
+
+```sh
+cd ~/.dsh/profiles/web
+pnpm add dsh-client-ui-dashboard@0.4.0
+```
+
+For a first installation, add the loader entry below. For an upgrade, keep the existing entry, restart `dsh web` and reload the browser. This command replaces any local development link with the npm version.
+
+## Local development installation
 
 ```sh
 npm ci

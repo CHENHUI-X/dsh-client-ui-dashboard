@@ -54,7 +54,8 @@
     "lib/client.js",
     "lib/types/**/*.d.ts",
     "README.md",
-    "README.zh.md"
+    "README.zh.md",
+    "CHANGELOG.md"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
@@ -96,7 +97,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/CHENHUI-X/dsh-client-ui-dashboard.git"
+    "url": "git+https://github.com/CHENHUI-X/dsh-client-ui-dashboard.git"
   },
   "publishConfig": {
     "access": "public"
