@@ -19,6 +19,18 @@ export declare const zh: {
     readonly "dashboard.analysis": "用量与性能";
     readonly "dashboard.requests": "请求明细";
     readonly "dashboard.agents": "协作状态";
+    readonly "analysis.calls": "调用次数";
+    readonly "analysis.toolSummary": "{calls} 次调用 / {tools} 种工具";
+    readonly "analysis.toolName": "工具";
+    readonly "analysis.totalTime": "总耗时";
+    readonly "analysis.avgTime": "平均耗时";
+    readonly "analysis.timedCalls": "次有耗时记录";
+    readonly "analysis.toolTimingNote": "耗时仅统计有关联记录的调用；缺失显示 —，包含等待用户操作的时间。";
+    readonly "analysis.noTools": "当前窗口尚无工具调用";
+    readonly "analysis.requestLatency": "请求耗时";
+    readonly "analysis.messages": "条消息";
+    readonly "analysis.injections": "次记录";
+    readonly "analysis.scrollTable": "左右滑动查看完整表格。";
     readonly "dashboard.analysisNote": "工具、模型与上下文的详细分析";
     readonly "dashboard.trends": "请求趋势";
     readonly "dashboard.trendsNote": "展开查看窗口内趋势";
