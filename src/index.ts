@@ -51,7 +51,7 @@ const scheduleItem = z.object({
   everySeconds: z.number().nullable(),
   state: z.union([z.literal("scheduled"), z.literal("dispatched")])
 });
-const boardSchema = z.object({
+const boardSchema: z.ZodType<BoardProjection> = z.object({
   workflow: z.array(workflowRun),
   schedule: z.array(scheduleItem)
 });
@@ -63,12 +63,15 @@ const boardSchema = z.object({
  */
 export function apply(ctx: Context): void {
   ctx.inject(["sessionProjections"], (projectionCtx) => {
-    projectionCtx.sessionProjections.register({
+    projectionCtx.sessionProjections.register<"boardState", BoardProjection>({
       key: "boardState",
-      schema: boardSchema,
+      stateSchema: boardSchema,
       init: (): BoardProjection => ({ workflow: [], schedule: [] }),
       apply: foldBoard,
-      view: (state) => state,
+      wire: {
+        viewSchema: boardSchema,
+        view: (state: BoardProjection) => state
+      },
       stateVersion: 1
     });
   });

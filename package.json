@@ -1,6 +1,6 @@
 {
   "name": "dsh-client-ui-dashboard",
-  "version": "0.2.6",
+  "version": "0.4.0",
   "description": "DSH web plugin: a real-time dashboard tab for the current conversation — token usage, cache hit rate, message-role distribution, and timing breakdowns, visualized.",
   "license": "MIT",
   "contributors": [
@@ -37,8 +37,14 @@
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-chat",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-trajectory"
       ],
       "platform": "web"
     }
@@ -51,34 +57,42 @@
     "README.zh.md"
   ],
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-client-locale": ">=0.2.1-rc.3 <0.3.0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.2.1-rc.3 <0.3.0",
+    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.1-rc.3 <0.3.0",
     "react": "^18.2.0"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
-    "zod": "^4.4.3"
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.3",
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-goal": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-session-projection": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-session-stats": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-token-meter": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-tool-todo": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-locale": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-chat": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-goal": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-stats": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-tool-todo": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-util-values": "0.2.1-rc.3",
     "@types/react": "~18.3.1",
     "esbuild": "^0.25.0",
-    "typescript": "~5.7.2"
+    "typescript": "~5.7.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "release:prep": "node scripts/release.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "node scripts/regression.mjs"
   },
   "repository": {
     "type": "git",

@@ -247,7 +247,8 @@ export function SeriesBars(props: {
 }): ReactNode {
   const { series, height = 110, valueFormatter, emptyLabel, showMaxTag = false, ariaLabel } = props;
   const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(1, ...series.map((s) => Math.max(0, s.value)));
+  const actualMax = Math.max(0, ...series.map((s) => Math.max(0, s.value)));
+  const max = actualMax || 1;
   const fmt = valueFormatter ?? ((v: number) => compactNumber(v));
   if (series.length === 0) {
     return (
@@ -258,7 +259,7 @@ export function SeriesBars(props: {
   }
   return (
     <div className="dshd-vbars" style={{ height, position: "relative" }} role="img" aria-label={ariaLabel ?? "bar chart"}>
-      {showMaxTag ? <div className="dshd-maxTag">{fmt(max)}</div> : null}
+      {showMaxTag ? <div className="dshd-maxTag">{fmt(actualMax)}</div> : null}
       {series.map((s, i) => {
         const v = Math.max(0, s.value);
         const pct = (v / max) * 100;
@@ -384,7 +385,8 @@ export function AreaChart(props: {
   const ref = useRef<HTMLDivElement | null>(null);
   const n = series.length;
   const values = series.map((s) => Math.max(0, s.value));
-  const max = Math.max(1, ...values);
+  const actualMax = Math.max(0, ...values);
+  const max = actualMax || 1;
   const width = Math.max(n * 16, 140);
   const pad = 4;
   const pts = values.map((v, i) => ({
@@ -419,7 +421,7 @@ export function AreaChart(props: {
       onMouseMove={onMove}
       onMouseLeave={() => setHover(null)}
     >
-      {showMaxTag ? <div className="dshd-maxTag">{fmt(max)}</div> : null}
+      {showMaxTag ? <div className="dshd-maxTag">{fmt(actualMax)}</div> : null}
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" role="img" aria-label={ariaLabel ?? "area chart"}>
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -515,7 +517,8 @@ export function Sparkline({
   height?: number;
 }) {
   if (values.length < 2) return null;
-  const max = Math.max(1, ...values);
+  const actualMax = Math.max(0, ...values);
+  const max = actualMax || 1;
   const step = width / (values.length - 1);
   const pts = values.map(
     (v, i) => `${(i * step).toFixed(1)},${(height - (Math.max(0, v) / max) * (height - 2) - 1).toFixed(1)}`
@@ -537,14 +540,9 @@ export function Sparkline({
 
 /** Deterministic palette for per-model coloring (theme variables, no deps). */
 export const MODEL_COLORS = [
-  "var(--dsw-alias-state-business-primary)",
-  "var(--dsw-alias-state-success-primary)",
-  "var(--dsw-alias-state-warn-primary)",
-  "var(--dsw-alias-state-error-primary)",
-  "color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-state-warn-primary) 45%)",
-  "color-mix(in srgb, var(--dsw-alias-state-success-primary) 55%, var(--dsw-alias-state-warn-primary) 45%)",
-  "color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, var(--dsw-alias-state-business-primary) 45%)",
-  "var(--dsw-alias-label-tertiary)"
+  "var(--dshd-accent)", "var(--dshd-teal)", "var(--dshd-indigo)",
+  "color-mix(in srgb,var(--dshd-accent) 60%,var(--dshd-teal))",
+  "var(--dshd-muted)"
 ];
 
 /** Deterministic per-model color (shared by model bars and the model timeline). */

@@ -8,6 +8,7 @@
  */
 import type { GoalProjection } from "@deepseek-ai/dsh-goal";
 import type { TodoItem } from "@deepseek-ai/dsh-tool-todo";
+import type { SessionListState } from "@deepseek-ai/dsh-api-session-controller/client";
 import type {
   BoardProjection,
   BoardScheduleItem,
@@ -53,6 +54,26 @@ export interface SessionSummaryLike {
       };
     };
   };
+}
+
+/**
+ * Direct child Sessions of one parent, adapted from the 0.2.x Session catalog
+ * (`byId` rows carrying `parentId`). 0.2.x dropped the pre-grouped
+ * `subagentsByParent` catalog, so the board derives its own child list.
+ * @param state - current Session catalog snapshot.
+ * @param parentId - the Session whose direct children are listed.
+ * @returns structural subagent entries in the shape the board renders.
+ */
+export function subagentEntriesOf(state: SessionListState, parentId: string): SubagentEntryLike[] {
+  const rows = Object.values(state.byId ?? {});
+  return rows
+    .filter((row) => row.parentId === parentId && row.origin === "subagent")
+    .map((row) => ({
+      kind: row.origin === "subagent" ? "subagent" : undefined,
+      id: row.id,
+      label: row.displayTitle,
+      activity: row.running ? "running" : "inactive"
+    }));
 }
 
 /** Whether a reminder is past its target; overdue is derived, never folded. */

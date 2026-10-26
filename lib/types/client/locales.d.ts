@@ -4,6 +4,19 @@ export declare const NS = "dashboard";
 export type DashboardLocaleKey = keyof typeof zh;
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export declare const zh: {
+    readonly "dashboard.subtitle": "当前会话的运行、用量与请求洞察";
+    readonly "dashboard.navigation": "看板分区";
+    readonly "dashboard.overview": "会话概览";
+    readonly "dashboard.analysis": "用量与性能";
+    readonly "dashboard.requests": "请求明细";
+    readonly "dashboard.agents": "协作状态";
+    readonly "dashboard.analysisNote": "工具、模型与上下文的详细分析";
+    readonly "dashboard.trends": "请求趋势";
+    readonly "dashboard.trendsNote": "展开查看窗口内趋势";
+    readonly "dashboard.costNote": "按可确认的模型单价估算";
+    readonly "dashboard.unpriced": "{n} 条请求未计价";
+    readonly "dashboard.latencyNote": "从请求发出到首个输出";
+    readonly "dashboard.speedNote": "输出生成阶段的平均速度";
     readonly "view.dashboard": "看板";
     readonly "view.dashboard.aria": "实时会话指标看板";
     readonly empty: "暂无会话数据 —— 开始一段对话后,指标会实时出现在这里。";
@@ -45,7 +58,7 @@ export declare const zh: {
     readonly "ttftCache.miss": "未命中";
     readonly "hint.ttftByCache": "命中/未命中请求的平均首字延迟(样本为窗口内已完成请求,与 P50/P95 统计口径略异)";
     readonly "section.modelCost": "按模型成本";
-    readonly "hint.modelCost": "按各请求自身模型定价估算;缓存读取按未命中价计";
+    readonly "hint.modelCost": "仅汇总可确认单价的请求；包含未计价请求时不显示完整成本。";
     readonly "hint.turnTail": "仅显示最近 12 轮(窗口内还有更多轮次未列出)";
     readonly "trend.rateFailed": "错误数";
     readonly "trend.contextOcc": "上下文占用率";
@@ -55,7 +68,7 @@ export declare const zh: {
     readonly "aria.modelTimeline": "模型切换时间线,每请求一个点,点击跳转到对应请求";
     readonly "hint.turnOpen": "该轮次结束事件不在当前窗口内(或仍在进行),耗时为窗口可见近似值";
     readonly "section.trend": "请求趋势";
-    readonly "section.requests": "请求列表(点击行展开详情)";
+    readonly "section.requests": "请求明细";
     readonly "stat.inputTokens": "输入 tokens";
     readonly "stat.outputTokens": "输出 tokens";
     readonly "stat.reasoningTokens": "推理 tokens";
@@ -93,7 +106,7 @@ export declare const zh: {
     readonly "hint.toolErrors": "返回错误结果的工具调用次数。";
     readonly "hint.compactions": "因上下文超限触发的历史压缩请求次数。";
     readonly "hint.compactionEffect": "每次压缩前后的上下文大小对比:压缩请求输入 → 其后首个助手请求输入。";
-    readonly "hint.cost": "按 DeepSeek 公开定价(2025-09 生效,每 1M tokens:chat 未命中 $0.27 / 命中 $0.07 / 输出 $1.10;reasoner 翻倍)粗估的美元成本;缓存写入按未命中价;缓存节省 = 命中 tokens × (未命中价 − 命中价)。";
+    readonly "hint.cost": "按 2026-10-26 核对的 DeepSeek 官方峰时公开价作参考估算，不代表历史账单；非峰时可能更低。第三方路由、未知模型或未上报用量不计价。";
     readonly "hint.failedProfile": "失败请求平均耗时 {a} vs 成功 {b}";
     readonly "hint.effort": "各推理强度档位的请求数与推理 tokens 合计";
     readonly "hint.totalDuration": "模型生成与工具调用耗时合计(全量)。";
@@ -119,7 +132,7 @@ export declare const zh: {
     readonly "timing.tool": "工具执行";
     readonly "timing.ttft": "首字延迟";
     readonly "timing.avg": "平均";
-    readonly "tools.note": "按调用次数排序,⚠ 表示该工具出现过错误";
+    readonly "tools.note": "按工具汇总；错误同时用文字和标记说明";
     readonly "models.input": "输入";
     readonly "models.output": "输出";
     readonly "models.requests": "请求";
@@ -133,7 +146,7 @@ export declare const zh: {
     readonly "status.idle": "就绪";
     readonly "unit.tps": "tok/s";
     readonly "unit.percent": "%";
-    readonly unknown: "—";
+    readonly unknown: "未记录";
     readonly total: "合计";
     readonly "req.status": "状态";
     readonly "req.model": "模型";
@@ -153,6 +166,7 @@ export declare const zh: {
     readonly "req.toolCalls": "工具调用";
     readonly "req.noToolCalls": "该请求没有工具调用";
     readonly "req.error": "错误";
+    readonly "req.errorMissing": "运行时未提供这条请求的错误详情。";
     readonly "req.seq": "请求序号";
     readonly "req.jumpTrajectory": "在轨迹中查看";
     readonly "req.jumpCompaction": "定位到该压缩附近的工具调用(压缩标记本身在轨迹中不可单独高亮)";

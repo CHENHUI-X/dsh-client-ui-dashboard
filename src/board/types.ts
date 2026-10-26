@@ -66,6 +66,9 @@ export interface BoardProjection {
 export const EMPTY_BOARD: BoardProjection = { workflow: [], schedule: [] };
 
 declare module "@deepseek-ai/dsh-session-projection/types" {
+  interface SessionProjectionStateMap {
+    boardState: BoardProjection;
+  }
   interface SessionProjectionMap {
     /**
      * This plugin's board unit: workflow runs + schedule reminders folded from

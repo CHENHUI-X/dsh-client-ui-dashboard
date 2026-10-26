@@ -4,7 +4,14 @@
  * framework-provided data, so it is trivially testable and re-runs cheaply
  * on every snapshot/projection change.
  */
-import type { ConversationNode, ConversationSnapshot } from "@deepseek-ai/dsh-client-runtime/client";
+import type { ConversationNode } from "@deepseek-ai/dsh-client-ui-conversation/client";
+/** Per-Turn timing index the Chat snapshot keeps in its legacy slice. */
+export interface TurnTimingIndex {
+    readonly turnTimings: ReadonlyMap<number, {
+        readonly startTime: number;
+        readonly endTime?: number;
+    }>;
+}
 import type { TrajectorySnapshot } from "./trajectory-contract";
 import type { SessionStatsProjection } from "@deepseek-ai/dsh-session-stats/client";
 import type { TokenUsageProjection, ContextBreakdownProjection, ContextPressureProjection } from "@deepseek-ai/dsh-token-meter/client";
@@ -42,7 +49,7 @@ export interface RequestSample {
     /** Whether the provider reported token usage at all (false = usage fields are all 0 / missing). */
     usageReported: boolean;
     /** Estimated USD cost for this request, priced by its own model (same source as RequestDetail.costUsd). */
-    costUsd: number;
+    costUsd: number | null;
 }
 /** One tool call observed in the loaded window, attached to its owning request step. */
 export interface ToolCallDetail {
@@ -66,7 +73,7 @@ export interface RequestDetail extends RequestSample {
     promptToolNames: readonly string[];
     toolCalls: readonly ToolCallDetail[];
     /** Estimated USD cost for this request, priced by its own model. */
-    costUsd: number;
+    costUsd: number | null;
 }
 /** Tool call histogram. */
 export interface ToolCallSample {
@@ -104,7 +111,7 @@ export interface ModelSplitRow {
     inputTokens: number;
     outputTokens: number;
     /** Estimated USD cost of this model's requests (each priced by its own model). */
-    costUsd: number;
+    costUsd: number | null;
     /** Mean wall time of completed requests for this model; null when none. */
     avgDurationMs: number | null;
     /** Mean TTFT over observable window samples for this model; null when none. */
@@ -224,8 +231,10 @@ export interface DashboardMetrics {
         failed: number;
     }[];
     costEstimateUsd: {
-        total: number;
-        cacheSavings: number;
+        total: number | null;
+        cacheSavings: number | null;
+        knownTotal: number;
+        unpricedRequests: number;
     };
     /** Consecutive runs of ≥3 identical tool calls (same name + raw args). */
     loops: {
@@ -295,36 +304,36 @@ export declare const EMPTY_METRICS: DashboardMetrics;
 export declare function billedInputTokens(u: TokenUsageProjection): number;
 /** Cache-hit share of billed prompt input; null when nothing was billed. */
 export declare function cacheHitPercent(u: TokenUsageProjection): number | null;
-/**
- * Per-1M-token prices (DeepSeek public pricing). Cache writes bill at the
- * miss rate. reasoner detection is a model-name heuristic (adapter names
- * vary); callers may refine it once the framework exposes a canonical flag.
+/** Current official peak-rate reference, USD per million tokens; not a historical invoice.
+ * Source: https://api-docs.deepseek.com/quick_start/pricing/ (checked 2026-10-26).
+ * Third-party routes never inherit official API prices.
  */
 export declare const DEEPSEEK_PRICES: {
-    readonly chat: {
-        readonly miss: 0.27;
-        readonly hit: 0.07;
-        readonly output: 1.1;
+    readonly "deepseek-flash": {
+        readonly miss: 0.3;
+        readonly hit: 0.006;
+        readonly output: 1.2;
     };
-    readonly reasoner: {
-        readonly miss: 0.55;
-        readonly hit: 0.14;
-        readonly output: 2.19;
+    readonly "deepseek-v4-flash": {
+        readonly miss: 0.3;
+        readonly hit: 0.006;
+        readonly output: 1.2;
+    };
+    readonly "deepseek-v4-pro": {
+        readonly miss: 1.32;
+        readonly hit: 0.044;
+        readonly output: 3.96;
     };
 };
-/** Pricing tier for a model name (heuristic). */
-export declare function isReasonerModel(model: string | null): boolean;
-/** Estimated USD cost of one request, priced by its own model. */
-export declare function estimateRequestCostUsd(model: string | null, usage: {
+/** Current official peak-rate estimate; null when the route cannot be priced. */
+export declare function estimateRequestCostUsd(provider: string | null, model: string | null, usage: {
     uncachedInputTokens: number;
     cacheReadTokens: number;
     cacheWriteTokens: number;
     outputTokens: number;
-}): number;
-/** Cache savings of one request (cache reads billed at the hit rate, so the
- *  savings = what those tokens would have cost uncached minus what they cost
- *  cached), priced by its own model. */
-export declare function estimateCacheSavingsUsd(model: string | null, cacheReadTokens: number): number;
+}): number | null;
+/** Cache savings under the same reference rate as the request estimate. */
+export declare function estimateCacheSavingsUsd(provider: string | null, model: string | null, cacheReadTokens: number): number | null;
 /** Count conversation nodes by dashboard role buckets. */
 export declare function countRoles(nodes: readonly ConversationNode[]): RoleCounts;
 /**
@@ -407,10 +416,10 @@ export declare function topErrors(series: readonly RequestSample[]): ErrorClassR
  * time inside the window (or "now" for the running turn) and flagged as
  * `closed: false` — instead of being silently dropped.
  */
-export declare function turnDurations(snapshot: Pick<ConversationSnapshot, "turnTimings">, nodes: readonly ConversationNode[], nowMs: number): TurnDuration[];
+export declare function turnDurations(snapshot: TurnTimingIndex, nodes: readonly ConversationNode[], nowMs: number): TurnDuration[];
 export interface DeriveInput {
     running: boolean;
-    snapshot: Pick<ConversationSnapshot, "turnTimings">;
+    snapshot: TurnTimingIndex;
     nodes: readonly ConversationNode[];
     requests: TrajectorySnapshot["requests"];
     tokenUsage: TokenUsageProjection | undefined;

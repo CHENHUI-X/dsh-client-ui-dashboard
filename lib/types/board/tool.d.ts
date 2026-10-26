@@ -8,7 +8,7 @@
  * @module dsh-client-ui-dashboard/board/tool
  */
 import type { Context } from "@deepseek-ai/cordis";
-import type { JsonValue } from "@deepseek-ai/dsh-tools";
+import type { JsonValue } from "@deepseek-ai/dsh-util-values";
 /** Tool-call result shape (mirrors the output schema). */
 export interface BoardQueryResult {
     /** The `goal` projection value (dsh-goal) or null. */

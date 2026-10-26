@@ -7,12 +7,10 @@
  * card now represents one child and one observable lifecycle state.
  */
 import { useEffect, useState } from "react";
-import type { ConvViewProps } from "@deepseek-ai/dsh-client-ui-conversation/client";
-import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
-import type { SubagentAddress } from "@deepseek-ai/dsh-client-runtime/client";
-import { IconChevronDownOutline14, IconChevronRightOutline14 } from "@deepseek-ai/dsh-client-ui-primitives";
+import type { PropsLocale, SubagentAddress, ViewRuntimeKit } from "./compat";
+import { IconChevronDownOutlineMedium, IconChevronRightOutlineMedium } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { NS, DashboardLocaleKey } from "./locales";
-import { childEntries } from "./board";
+import { subagentEntriesOf } from "./board";
 import type { SessionSummaryLike, SubagentEntryLike } from "./board";
 
 /**
@@ -21,11 +19,11 @@ import type { SessionSummaryLike, SubagentEntryLike } from "./board";
  * introduced.
  */
 export type BoardBodyProps = Pick<
-  ConvViewProps & PropsLocale<typeof NS>,
+  ViewRuntimeKit & PropsLocale<typeof NS>,
   "useSessions" | "t" | "sessionId"
 > & BoardNavigation;
 
-/** Navigation face supplied by the browser plugin's sessions service. */
+/** Navigation supplied by the host Workspace service. */
 export interface BoardNavigation {
   openSubagent: (address: SubagentAddress) => void;
 }
@@ -84,7 +82,7 @@ function SubagentCard(props: {
   const { entry, summary, onOpen, t } = props;
   const state = subagentState(entry, summary);
   const label = entry.label ?? summaryTitle(summary) ?? entry.id;
-  const mode = entry.mode === "continuable" ? t("board.subagent.mode.continuable") : t("board.subagent.mode.oneShot");
+  const mode = entry.mode === undefined ? null : entry.mode === "continuable" ? t("board.subagent.mode.continuable") : t("board.subagent.mode.oneShot");
   const status =
     state === "running"
       ? t("board.subagents.running")
@@ -98,7 +96,7 @@ function SubagentCard(props: {
         <span className="dshd-subagentDot" aria-hidden="true" />
         <div className="dshd-subagentIdentity">
           <span className="dshd-subagentTitle">{label}</span>
-          <span className="dshd-subagentMode">{mode}</span>
+          {mode !== null && <span className="dshd-subagentMode">{mode}</span>}
         </div>
         <span className="dshd-subagentStatus">{status}</span>
       </div>
@@ -131,10 +129,8 @@ export function BoardBody(props: BoardBodyProps): JSX.Element {
     setArchiveOpen(false);
     setNow(Date.now());
   }, [sessionId]);
-  const catalogs = useSessions((s) => s.subagentsByParent);
+  const subagents = useSessions((s) => subagentEntriesOf(s, sessionId));
   const summaries = useSessions((s) => s.byId);
-  const entries = catalogs[sessionId];
-  const subagents = childEntries(entries?.entries as readonly SubagentEntryLike[] | undefined);
   const rows = subagents.map((entry) => {
     const summary = summaryOf(summaries, entry.id);
     const state = subagentState(entry, summary);
@@ -163,7 +159,7 @@ export function BoardBody(props: BoardBodyProps): JSX.Element {
       onOpen={() => openSubagent({
         parentSessionId: sessionId as SubagentAddress["parentSessionId"],
         childSessionId: row.entry.id as SubagentAddress["childSessionId"],
-        mode: row.entry.mode === "continuable" ? "continuable" : "one-shot",
+        mode: row.entry.mode ?? "unknown",
       })}
       t={t}
     />
@@ -205,7 +201,7 @@ export function BoardBody(props: BoardBodyProps): JSX.Element {
               <span>{t("board.subagents.archived")}</span>
               <span className="dshd-subagentArchiveMeta">
                 <strong>{archiveCount}</strong>
-                {archiveOpen ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
+                {archiveOpen ? <IconChevronDownOutlineMedium /> : <IconChevronRightOutlineMedium />}
               </span>
             </button>
           </div>

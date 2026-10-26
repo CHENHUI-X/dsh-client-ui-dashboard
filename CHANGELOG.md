@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-10-26
+
+- Support dsh 0.2.1-rc.3 Session/Conversation snapshots, lazy Trajectory subscriptions, Workspace child navigation and the state/wire projection contract.
+- Pin published development contracts and Zod to the host versions; remove sibling-checkout dependency links and the projection type escape.
+- Replace duplicated summary grids with Overview, Usage & performance, Requests and Agents sections. Use host-aware tokens, stroke icons, container layouts and quiet interactions.
+- Move request trends behind disclosure, replace role donuts with labelled bars, distinguish data series from alerts and remove unused kanban CSS.
+- Preserve unknown prices and missing projections, repair compaction filtering, and keep elapsed timings current without leaking interval handles.
+- Add three focused migration/render regression checks and update installation/data semantics documentation.
+
+
 ## 0.2.5 (2026-08-18)
 
 ### 修复

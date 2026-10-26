@@ -1,4 +1,5 @@
 import type { TodoItem } from "@deepseek-ai/dsh-tool-todo";
+import type { SessionListState } from "@deepseek-ai/dsh-api-session-controller/client";
 import type { BoardProjection, BoardScheduleItem, BoardWorkflowRun } from "../board/types";
 export type { GoalProjection } from "@deepseek-ai/dsh-goal";
 export type { TodoItem } from "@deepseek-ai/dsh-tool-todo";
@@ -31,6 +32,15 @@ export interface SessionSummaryLike {
         };
     };
 }
+/**
+ * Direct child Sessions of one parent, adapted from the 0.2.x Session catalog
+ * (`byId` rows carrying `parentId`). 0.2.x dropped the pre-grouped
+ * `subagentsByParent` catalog, so the board derives its own child list.
+ * @param state - current Session catalog snapshot.
+ * @param parentId - the Session whose direct children are listed.
+ * @returns structural subagent entries in the shape the board renders.
+ */
+export declare function subagentEntriesOf(state: SessionListState, parentId: string): SubagentEntryLike[];
 /** Whether a reminder is past its target; overdue is derived, never folded. */
 export declare function isOverdue(item: BoardScheduleItem, nowMs: number): boolean;
 /** Reminders still pending delivery, soonest target first. */

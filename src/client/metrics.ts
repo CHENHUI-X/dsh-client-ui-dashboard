@@ -4,7 +4,12 @@
  * framework-provided data, so it is trivially testable and re-runs cheaply
  * on every snapshot/projection change.
  */
-import type { ConversationNode, ConversationSnapshot, RunningToolCall, ToolCallBlock, ToolResultNode } from "@deepseek-ai/dsh-client-runtime/client";
+import type { ConversationNode, RunningToolCall, ToolCallBlock, ToolResultNode } from "@deepseek-ai/dsh-client-ui-conversation/client";
+
+/** Per-Turn timing index the Chat snapshot keeps in its legacy slice. */
+export interface TurnTimingIndex {
+  readonly turnTimings: ReadonlyMap<number, { readonly startTime: number; readonly endTime?: number }>;
+}
 import type { TrajectorySnapshot } from "./trajectory-contract";
 import type { SessionStatsProjection } from "@deepseek-ai/dsh-session-stats/client";
 import type { TokenUsageProjection, ContextBreakdownProjection, ContextPressureProjection } from "@deepseek-ai/dsh-token-meter/client";
@@ -44,7 +49,7 @@ export interface RequestSample {
   /** Whether the provider reported token usage at all (false = usage fields are all 0 / missing). */
   usageReported: boolean;
   /** Estimated USD cost for this request, priced by its own model (same source as RequestDetail.costUsd). */
-  costUsd: number;
+  costUsd: number | null;
 }
 
 /** One tool call observed in the loaded window, attached to its owning request step. */
@@ -70,7 +75,7 @@ export interface RequestDetail extends RequestSample {
   promptToolNames: readonly string[];
   toolCalls: readonly ToolCallDetail[];
   /** Estimated USD cost for this request, priced by its own model. */
-  costUsd: number;
+  costUsd: number | null;
 }
 
 /** Tool call histogram. */
@@ -113,7 +118,7 @@ export interface ModelSplitRow {
   inputTokens: number;
   outputTokens: number;
   /** Estimated USD cost of this model's requests (each priced by its own model). */
-  costUsd: number;
+  costUsd: number | null;
   /** Mean wall time of completed requests for this model; null when none. */
   avgDurationMs: number | null;
   /** Mean TTFT over observable window samples for this model; null when none. */
@@ -227,7 +232,7 @@ export interface DashboardMetrics {
   // Minute-bucketed activity (window, oldest → newest).
   throughput: { bucketMs: number; requests: number; inputTokens: number; outputTokens: number; failed: number }[];
   // Rough USD cost estimate (DeepSeek public pricing) + cache savings.
-  costEstimateUsd: { total: number; cacheSavings: number };
+  costEstimateUsd: { total: number | null; cacheSavings: number | null; knownTotal: number; unpricedRequests: number };
   // Agent-health diagnostics (window)
   /** Consecutive runs of ≥3 identical tool calls (same name + raw args). */
   loops: { name: string; count: number; seqs: number[] }[];
@@ -310,7 +315,7 @@ export const EMPTY_METRICS: DashboardMetrics = {
   failedStats: { count: 0, avgDurationMs: null, avgInputTokens: null },
   completedStats: { count: 0, avgDurationMs: null, avgInputTokens: null },
   throughput: [],
-  costEstimateUsd: { total: 0, cacheSavings: 0 },
+  costEstimateUsd: { total: null, cacheSavings: null, knownTotal: 0, unpricedRequests: 0 },
   loops: [],
   noProgress: [],
   toolStorm: [],
@@ -370,41 +375,36 @@ export function cacheHitPercent(u: TokenUsageProjection): number | null {
   return total === 0 ? null : Math.round((u.cacheReadTokens / total) * 100);
 }
 
-/**
- * Per-1M-token prices (DeepSeek public pricing). Cache writes bill at the
- * miss rate. reasoner detection is a model-name heuristic (adapter names
- * vary); callers may refine it once the framework exposes a canonical flag.
+/** Current official peak-rate reference, USD per million tokens; not a historical invoice.
+ * Source: https://api-docs.deepseek.com/quick_start/pricing/ (checked 2026-10-26).
+ * Third-party routes never inherit official API prices.
  */
 export const DEEPSEEK_PRICES = {
-  chat: { miss: 0.27, hit: 0.07, output: 1.1 },
-  reasoner: { miss: 0.55, hit: 0.14, output: 2.19 }
+  "deepseek-flash": { miss: 0.3, hit: 0.006, output: 1.2 },
+  "deepseek-v4-flash": { miss: 0.3, hit: 0.006, output: 1.2 },
+  "deepseek-v4-pro": { miss: 1.32, hit: 0.044, output: 3.96 }
 } as const;
 
-/** Pricing tier for a model name (heuristic). */
-export function isReasonerModel(model: string | null): boolean {
-  return /reasoner/i.test(model ?? "");
+function requestPrice(provider: string | null, model: string | null) {
+  if (provider !== "deepseek-official" || model === null || !Object.hasOwn(DEEPSEEK_PRICES, model)) return null;
+  return DEEPSEEK_PRICES[model as keyof typeof DEEPSEEK_PRICES];
 }
 
-/** Estimated USD cost of one request, priced by its own model. */
+/** Current official peak-rate estimate; null when the route cannot be priced. */
 export function estimateRequestCostUsd(
+  provider: string | null,
   model: string | null,
   usage: { uncachedInputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
-): number {
-  const p = isReasonerModel(model) ? DEEPSEEK_PRICES.reasoner : DEEPSEEK_PRICES.chat;
-  return (
-    ((usage.uncachedInputTokens + usage.cacheWriteTokens) * p.miss +
-      usage.cacheReadTokens * p.hit +
-      usage.outputTokens * p.output) /
-    1_000_000
-  );
+): number | null {
+  const p = requestPrice(provider, model);
+  if (p === null) return null;
+  return ((usage.uncachedInputTokens + usage.cacheWriteTokens) * p.miss + usage.cacheReadTokens * p.hit + usage.outputTokens * p.output) / 1_000_000;
 }
 
-/** Cache savings of one request (cache reads billed at the hit rate, so the
- *  savings = what those tokens would have cost uncached minus what they cost
- *  cached), priced by its own model. */
-export function estimateCacheSavingsUsd(model: string | null, cacheReadTokens: number): number {
-  const p = isReasonerModel(model) ? DEEPSEEK_PRICES.reasoner : DEEPSEEK_PRICES.chat;
-  return (cacheReadTokens * (p.miss - p.hit)) / 1_000_000;
+/** Cache savings under the same reference rate as the request estimate. */
+export function estimateCacheSavingsUsd(provider: string | null, model: string | null, cacheReadTokens: number): number | null {
+  const p = requestPrice(provider, model);
+  return p === null ? null : (cacheReadTokens * (p.miss - p.hit)) / 1_000_000;
 }
 
 /** Count conversation nodes by dashboard role buckets. */
@@ -465,7 +465,7 @@ export function indexToolCalls(nodes: readonly ConversationNode[]): Map<number, 
       if ("kind" in sub) {
         collect(sub);
       } else {
-        add({ callId: sub.callId, name: sub.name, argsRaw: sub.argsRaw, durationMs: null, isError: false });
+        add({ callId: sub.callId, name: sub.name, argsRaw: "argsRaw" in sub ? sub.argsRaw : null, durationMs: null, isError: false });
         collectRunning(sub);
       }
     }
@@ -625,6 +625,7 @@ export function requestSeries(
   const details: RequestDetail[] = [];
   for (const request of requests) {
     const usage = readUsage(request.usage);
+    const usageReported = Object.values(usage).some((value) => value !== undefined);
     const input =
       toInt(usage.inputTokens) + toInt(usage.cacheReadTokens) + toInt(usage.cacheWriteTokens);
     const durationMs =
@@ -645,16 +646,11 @@ export function requestSeries(
       reasoningTokens: toInt(usage.reasoningTokens),
       startedAt: request.startedAt,
       durationMs,
-      provider: request.provenance?.provider ?? request.requestConfig?.provider ?? null,
-      model: request.provenance?.model ?? request.requestConfig?.model ?? null,
-      error: request.error ?? null,
-      usageReported:
-        toInt(usage.inputTokens) > 0 ||
-        toInt(usage.cacheReadTokens) > 0 ||
-        toInt(usage.cacheWriteTokens) > 0 ||
-        toInt(usage.outputTokens) > 0 ||
-        toInt(usage.reasoningTokens) > 0,
-      costUsd: estimateRequestCostUsd(request.provenance?.model ?? request.requestConfig?.model ?? null, {
+      provider: request.providerMetadata?.provider ?? request.requestConfig?.provider ?? null,
+      model: request.providerMetadata?.model ?? request.requestConfig?.model ?? null,
+      error: request.error ?? request.errorCode ?? null,
+      usageReported,
+      costUsd: request.status === "running" || !usageReported ? null : estimateRequestCostUsd(request.providerMetadata?.provider ?? request.requestConfig?.provider ?? null, request.providerMetadata?.model ?? request.requestConfig?.model ?? null, {
         uncachedInputTokens: input - toInt(usage.cacheReadTokens) - toInt(usage.cacheWriteTokens),
         cacheReadTokens: toInt(usage.cacheReadTokens),
         cacheWriteTokens: toInt(usage.cacheWriteTokens),
@@ -668,13 +664,13 @@ export function requestSeries(
     const prompt = (request as { prompt?: { system?: string; tools?: readonly { name?: string }[] } }).prompt;
     details.push({
       ...sample,
-      thinking: (request.requestConfig?.thinking ?? false) === true,
+      thinking: request.requestConfig?.thinking !== undefined && request.requestConfig.thinking !== "disabled",
       reasoningEffort: request.requestConfig?.reasoningEffort ?? null,
       temperature: request.requestConfig?.temperature ?? null,
       maxTokens: request.requestConfig?.maxTokens ?? null,
-      retry: request.retry ?? 0,
-      maxRetries: request.maxRetries ?? 0,
-      retryDelayMs: request.retryDelayMs ?? null,
+      retry: ("retry" in request ? request.retry : undefined) ?? 0,
+      maxRetries: ("maxRetries" in request ? request.maxRetries : undefined) ?? 0,
+      retryDelayMs: ("retryDelayMs" in request ? request.retryDelayMs : undefined) ?? null,
       promptSystemChars: prompt?.system === undefined ? null : prompt.system.length,
       promptToolNames: prompt?.tools?.map((t) => t.name ?? "").filter((n) => n.length > 0) ?? [],
       toolCalls: calls,
@@ -705,7 +701,7 @@ export function modelSplit(
   };
   const rows = new Map<string, Acc>();
   for (const s of series) {
-    const key = s.model ?? s.provider ?? "unknown";
+    const key = `${s.provider ?? "unknown"}\u0000${s.model ?? "unknown"}`;
     const row = rows.get(key) ?? {
       model: s.model ?? "unknown",
       provider: s.provider ?? "unknown",
@@ -722,7 +718,7 @@ export function modelSplit(
     row.requests += 1;
     row.inputTokens += s.inputTokens;
     row.outputTokens += s.outputTokens;
-    row.costUsd += s.costUsd;
+    row.costUsd = row.costUsd === null || s.costUsd === null ? null : row.costUsd + s.costUsd;
     if (s.status === "error") row.errorCount += 1;
     // Only completed requests feed the duration average (consistent with
     // durationStats/failedStats); failed attempts otherwise skew the row.
@@ -769,24 +765,19 @@ export function turnInputSeries(series: readonly RequestSample[]): TurnInputRow[
 
 /** Pair each compaction request with the first assistant request that followed it. */
 export function compactionEffect(series: readonly RequestSample[]): CompactionEffectRow[] {
-  const ordered = [...series].sort((a, b) => a.seq - b.seq);
+  const ordered = [...series].sort((a, b) => b.seq - a.seq);
   const out: CompactionEffectRow[] = [];
-  for (let i = 0; i < ordered.length; i += 1) {
-    const s = ordered[i]!;
+  let after: RequestSample | undefined;
+  for (const s of ordered) {
+    if (s.purpose === "assistant") { after = s; continue; }
     if (s.purpose !== "compaction") continue;
-    const after = ordered.slice(i + 1).find((x) => x.purpose === "assistant");
     const before = s.inputTokens;
     const afterTokens = after?.inputTokens ?? null;
     const recovered = before > 0 && afterTokens !== null ? Math.max(0, before - afterTokens) : null;
-    out.push({
-      turn: s.turn,
-      seq: s.seq,
-      beforeTokens: before > 0 ? before : null,
-      afterTokens,
-      recoveredTokens: recovered,
-      recoveredPct: recovered !== null && before > 0 ? Math.round((recovered / before) * 100) : null
-    });
+    out.push({ turn: s.turn, seq: s.seq, beforeTokens: before > 0 ? before : null, afterTokens,
+      recoveredTokens: recovered, recoveredPct: recovered !== null && before > 0 ? Math.round((recovered / before) * 100) : null });
   }
+  out.reverse();
   return out;
 }
 
@@ -849,10 +840,10 @@ export function contextInjection(
   const map = new Map<string, { label: string; role: string; form: string; count: number; chars: number }>();
   for (const node of nodes) {
     if (node.kind !== "context") continue;
-    const label = node.provenance.label ?? "?";
+    const label = node.producer.label ?? "?";
     const form = node.form ?? "opaque";
     const key = `${label}\u0000${form}`;
-    const row = map.get(key) ?? { label, role: node.provenance.role, form, count: 0, chars: 0 };
+    const row = map.get(key) ?? { label, role: node.producer.role, form, count: 0, chars: 0 };
     row.count += 1;
     row.chars += node.content.reduce(
       (n, b) => n + ("text" in b && typeof b.text === "string" ? b.text.length : 0),
@@ -915,7 +906,7 @@ export function topErrors(series: readonly RequestSample[]): ErrorClassRow[] {
  * `closed: false` — instead of being silently dropped.
  */
 export function turnDurations(
-  snapshot: Pick<ConversationSnapshot, "turnTimings">,
+  snapshot: TurnTimingIndex,
   nodes: readonly ConversationNode[],
   nowMs: number
 ): TurnDuration[] {
@@ -936,7 +927,7 @@ export function turnDurations(
 
 export interface DeriveInput {
   running: boolean;
-  snapshot: Pick<ConversationSnapshot, "turnTimings">;
+  snapshot: TurnTimingIndex;
   nodes: readonly ConversationNode[];
   requests: TrajectorySnapshot["requests"];
   tokenUsage: TokenUsageProjection | undefined;
@@ -1115,9 +1106,11 @@ export function deriveMetrics(input: DeriveInput, nowMs: number): DashboardMetri
   // Per-request cost (each request priced by its own model) + cache savings.
   let costTotal = 0;
   let costSavings = 0;
+  let unpricedRequests = 0;
   for (const d of details) {
+    if (d.costUsd === null) { unpricedRequests += 1; continue; }
     costTotal += d.costUsd;
-    costSavings += estimateCacheSavingsUsd(d.model, d.cacheReadTokens);
+    costSavings += estimateCacheSavingsUsd(d.provider, d.model, d.cacheReadTokens) ?? 0;
   }
 
   const stats = input.stats;
@@ -1207,7 +1200,7 @@ export function deriveMetrics(input: DeriveInput, nowMs: number): DashboardMetri
     ttftByCache,
     contextTrend,
     contextInjection: contextInjection(input.nodes),
-    costEstimateUsd: { total: costTotal, cacheSavings: costSavings },
+    costEstimateUsd: { total: details.length === 0 || unpricedRequests > 0 ? null : costTotal, cacheSavings: details.length === 0 || unpricedRequests > 0 ? null : costSavings, knownTotal: costTotal, unpricedRequests },
     llmMs: stats?.llmMs ?? 0,
     toolMs: stats?.toolMs ?? 0,
     ttftMs: stats?.ttftMs ?? 0,

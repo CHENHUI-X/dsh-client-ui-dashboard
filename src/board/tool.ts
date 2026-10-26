@@ -9,7 +9,7 @@
  */
 import type { Context } from "@deepseek-ai/cordis";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import type { JsonValue } from "@deepseek-ai/dsh-tools";
+import type { JsonValue } from "@deepseek-ai/dsh-util-values";
 import { EMPTY_BOARD } from "./types";
 import type { BoardProjection } from "./types";
 

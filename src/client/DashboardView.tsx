@@ -4,34 +4,28 @@
  * standard kit (`useSession` + `useProjection`) so it updates in real time as
  * session events land, with no host round-trips of its own.
  *
- * View linkage: when the conversation plugin's shared store handle is
- * declared on this entry (see client/index.ts), the renderer hands us the
- * shared `actions` seat — clicking a request row then switches to the
- * trajectory view and inspects the request's first tool call, exactly like
- * the chat view's own inspect handoff.
+ * Request navigation uses the host openView callback and an exact tool-call address.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tooltip } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { ConvViewProps } from "@deepseek-ai/dsh-client-ui-conversation/client";
-import type { PropsLocale, SnapshotSelectorHook } from "@deepseek-ai/dsh-client-ui-slots";
+import type { ConversationNode, RunningToolCall } from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type { PropsLocale, ViewRuntimeKit } from "./compat";
 import type { NS } from "./locales";
 import { deriveMetrics } from "./metrics";
 import type { DashboardMetrics, RequestDetail, RequestSample } from "./metrics";
+import { DashboardIcon } from "./icons";
 import { CHART_COLORS } from "./dashboard.css";
 import { HudStrip, useHudData } from "./HudStrip";
 import { BoardBody } from "./BoardView";
 import type { BoardNavigation } from "./BoardView";
-import { childEntries } from "./board";
+import { subagentEntriesOf } from "./board";
 import type { SubagentEntryLike } from "./board";
 import {
   AreaChart,
-  DonutChart,
   HorizontalBars,
-  Legend,
   ModelTimeline,
   RadialGauge,
   SeriesBars,
-  Sparkline,
   StackedBar,
   compactNumber,
   exactNumber,
@@ -47,31 +41,13 @@ import type { ChartDatum, RowDatum, SeriesDatum } from "./charts";
  */
 const scrollMemory = new Map<string, number>();
 
-/** The shared conversation store's action surface (structural subset). */
-interface SharedChatActions {
-  select(target: { turnSeq: number; stepSeq?: number; callId?: string; toolName?: string } | null): void;
-  setDraft(text: string): void;
-  setView(view: string | null): void;
-  setInspect(target: { callId: string } | null): void;
-}
+/** Stable empty fallbacks while the chat target has not published yet. */
+const EMPTY_NODES: readonly ConversationNode[] = [];
+const EMPTY_TURN_TIMINGS: ReadonlyMap<number, { readonly startTime: number; readonly endTime?: number }> = new Map();
+const EMPTY_RUNNING_CALLS: readonly RunningToolCall[] = [];
 
-export type DashboardViewProps = ConvViewProps &
-  PropsLocale<typeof NS> & {
-    useStore?: SnapshotSelectorHook<unknown>;
-    actions?: SharedChatActions;
-  } & BoardNavigation;
+export type DashboardViewProps = ViewRuntimeKit & PropsLocale<typeof NS> & BoardNavigation;
 
-/** Categorical palette for non-model series (tool names, commands): deterministic,
- *  distinct hues in every theme. Models use the shared `modelColor` hash so the
- *  model bars and the model timeline never disagree on a color. */
-const TOOL_COLORS: readonly string[] = [
-  "var(--dsw-alias-state-warn-primary)",
-  "var(--dsw-alias-state-business-primary)",
-  "var(--dsw-alias-state-success-primary)",
-  "var(--dsw-alias-state-error-primary)",
-  "color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, var(--dsw-alias-state-warn-primary) 45%)",
-  "color-mix(in srgb, var(--dsw-alias-state-error-primary) 60%, var(--dsw-alias-state-warn-primary) 40%)"
-];
 const STREAM_MAX_CHARS = 100;
 
 type StreamingBlockLike = {
@@ -213,7 +189,8 @@ function Hint(props: { label: string }): JSX.Element {
 }
 
 /** Adaptive USD formatting: fewer decimals for larger amounts, never "$0.0000". */
-function fmtCost(v: number): string {
+function fmtCost(v: number | null): string {
+  if (v === null) return "—";
   if (v <= 0) return "$0";
   if (v >= 1) return `$${v.toFixed(2)}`;
   // Only collapse to "<$0.0001" when the value truly rounds to zero at 4
@@ -257,9 +234,8 @@ function StatCard(props: {
   sub?: string;
   hint?: string;
   tone?: "accent" | "good" | "warn" | "bad" | "reasoning";
-  spark?: { values: readonly number[]; color: string; title?: string };
 }): JSX.Element {
-  const { label, value, sub, hint, tone, spark } = props;
+  const { label, value, sub, hint, tone } = props;
   return (
     <div className="dshd-stat">
       <div className="dshd-statLabel">
@@ -276,11 +252,6 @@ function StatCard(props: {
       >
         {value}
       </div>
-      {spark !== undefined && spark.values.length >= 2 ? (
-        <div className="dshd-statSpark" title={spark.title}>
-          <Sparkline values={spark.values} color={spark.color} />
-        </div>
-      ) : null}
       {sub !== undefined ? <div className="dshd-statSub" title={sub}>{sub}</div> : null}
     </div>
   );
@@ -413,10 +384,10 @@ function RequestDetailPanel(props: {
         )}
       </div>
 
-      {detail.error !== null ? (
+      {detail.error !== null || detail.status === "error" ? (
         <div>
           <div className="dshd-kvKey" style={{ marginBottom: "4px" }}>{t("req.error")}</div>
-          <div className="dshd-errorBox">{detail.error}</div>
+          <div className="dshd-errorBox">{detail.error ?? t("req.errorMissing")}</div>
         </div>
       ) : null}
     </div>
@@ -426,19 +397,21 @@ function RequestDetailPanel(props: {
 function TrendSection(props: {
   metrics: DashboardMetrics;
   t: DashboardViewProps["t"];
-  actions?: SharedChatActions;
+  onJump?: (seq: number) => void;
   jumpTo: (seq: number) => void;
+  initialFilter: "all" | "error";
 }): JSX.Element {
-  const { metrics, t, actions, jumpTo } = props;
+  const { metrics, t, onJump, jumpTo, initialFilter } = props;
+  const detailsBySeq = useMemo(() => new Map(metrics.details.map((d) => [d.seq, d])), [metrics.details]);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
-  const [filter, setFilter] = useState<"all" | "running" | "complete" | "error">("all");
+  const [filter, setFilter] = useState<"all" | "running" | "complete" | "error">(initialFilter);
   const [newArrived, setNewArrived] = useState(false);
   const lastSeqRef = useRef<number | null>(null);
   /** Rows rendered per group before a "more rows exist" note (DOM cap for long sessions). */
   const GROUP_ROW_CAP = 20;
-  const canJump = actions !== undefined;
+  const canJump = onJump !== undefined;
   const colCount = 8 + (canJump ? 1 : 0);
 
   // Download the current view's requests as JSON — respects filter, search and
@@ -450,7 +423,7 @@ function TrendSection(props: {
       search: search.trim(),
       view,
       requests: searched.map((s) => {
-        const d = metrics.details.find((x) => x.seq === s.seq);
+        const d = detailsBySeq.get(s.seq);
         return {
           seq: s.seq,
           turn: s.turn,
@@ -467,7 +440,7 @@ function TrendSection(props: {
           startedAt: s.startedAt,
           durationMs: s.durationMs,
           error: s.error,
-          costUsd: d?.costUsd ?? 0,
+          costUsd: d?.costUsd ?? null,
           reasoningEffort: d?.reasoningEffort ?? null,
           temperature: d?.temperature ?? null,
           retry: d?.retry ?? 0,
@@ -493,7 +466,7 @@ function TrendSection(props: {
   // Search: seq / turn / model / error message / purpose / tool name.
   const q = search.trim().toLowerCase();
   const searched = q.length === 0 ? filtered : filtered.filter((s) => {
-    const d = metrics.details.find((x) => x.seq === s.seq);
+    const d = detailsBySeq.get(s.seq);
     return (
       String(s.seq).includes(q) ||
       String(s.turn).includes(q) ||
@@ -510,10 +483,10 @@ function TrendSection(props: {
 
   // Grouped views share the same row renderer as the table.
   const renderRow = (s: RequestSample): JSX.Element => {
-    const detail = metrics.details.find((d) => d.seq === s.seq);
+    const detail = detailsBySeq.get(s.seq);
     const open = openSeq === s.seq;
     const isError = s.status === "error";
-    const jumpMode = canJump && !isError;
+    const jumpMode = canJump && !isError && (detail?.toolCalls.length ?? 0) > 0;
     return (
       <FragmentRow
         key={s.seq}
@@ -573,6 +546,7 @@ function TrendSection(props: {
                 <button
                   type="button"
                   className="dshd-jump"
+                  disabled={(detail?.toolCalls.length ?? 0) === 0}
                   aria-label={t("req.jumpTrajectory")}
                   title={s.purpose === "compaction" ? t("req.jumpCompaction") : t("req.jumpTrajectory")}
                   onClick={(e) => {
@@ -591,7 +565,7 @@ function TrendSection(props: {
             <RequestDetailPanel
               detail={detail}
               t={t}
-              onJump={canJump ? () => jumpTo(s.seq) : undefined}
+              onJump={canJump && (detail?.toolCalls.length ?? 0) > 0 ? () => jumpTo(s.seq) : undefined}
             />
           ) : null
         }
@@ -743,7 +717,7 @@ function TrendSection(props: {
   const rateFailBars: SeriesDatum[] = metrics.throughput.map((b) => ({
     label: bucketTime(b.bucketMs),
     value: b.failed,
-    color: CHART_COLORS.output
+    color: CHART_COLORS.error
   }));
   const totalFailed = metrics.series.filter((s) => s.status === "error").length;
   // Context occupancy over the window: per-request input ÷ context window (S3).
@@ -777,6 +751,8 @@ function TrendSection(props: {
 
   return (
     <div className="dshd-col">
+      <details className="dshd-trendDetails"><summary><DashboardIcon name="analysis" />{t("dashboard.trends")}<span>{t("dashboard.trendsNote")}</span><DashboardIcon name="chevron" /></summary>
+      <div className="dshd-trendGrid">
       <div className="dshd-seriesRow">
         <div className="dshd-seriesCol">
           <div className="dshd-seriesLabel">
@@ -922,14 +898,14 @@ function TrendSection(props: {
         </div>
         <div className="dshd-seriesCol">
           <div className="dshd-seriesLabel">
-            <span style={{ width: 9, height: 9, borderRadius: 2.5, background: CHART_COLORS.output, display: "inline-block" }} />
+            <span style={{ width: 9, height: 9, borderRadius: 2.5, background: CHART_COLORS.error, display: "inline-block" }} />
             {t("trend.rateFailed")}
             <span className="dshd-seriesTotal">{exactNumber(totalFailed)}</span>
           </div>
           <AreaChart
             series={rateFailBars}
             height={60}
-            color={CHART_COLORS.output}
+            color={CHART_COLORS.error}
             valueFormatter={(v) => exactNumber(v)}
             emptyLabel={t("empty.requests")}
             showMaxTag
@@ -954,6 +930,7 @@ function TrendSection(props: {
         </div>
       </div>
 
+      </div></details>
       <div className="dshd-viewTabs" role="group" aria-label={t("view.tabs.aria")}>
         {(["table", "turn", "model", "error"] as const).map((v) => (
           <button
@@ -1237,6 +1214,7 @@ function FragmentRow(props: {
         tabIndex={0}
         onClick={props.onRowClick}
         onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             props.onRowClick();
@@ -1256,7 +1234,7 @@ function FragmentRow(props: {
 
 /** The dashboard conversation-view entry. */
 export function DashboardView(props: DashboardViewProps): JSX.Element {
-  const { useSession, useProjection, useSessions, t, actions, sessionId } = props;
+  const { useSession, useConversation, useTrajectory, useProjection, useSessions, t, openView, sessionId } = props;
   // ── 看板自持滚动容器 + 按会话滚动记忆 ──────────────────────────────────
   // 根元素声明 data-conversation-composer-overlay 后，会话列共享滚动体
   // 让位（与轨迹视图同款官方模式），本视图拥有自己的滚动条，切换 tab
@@ -1292,16 +1270,23 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
     const el = rootRef.current;
     if (el !== null) scrollMemory.set(sessionRef.current, el.scrollTop);
   }, []);
-  const trajectory = useSession((s) => s.views.get("trajectory"));
-  const nodes = useSession((s) => s.chat.legacy.nodes);
-  const turnTimings = useSession((s) => s.turnTimings);
+  // 0.2.x split the old merged Conversation snapshot: Session facts stay on
+  // `useSession`, while Conversation targets (chat, trajectory) are read from
+  // the Conversation view hooks. The chat target keeps the legacy slice the
+  // dashboard derives its metrics from.
+  const chat = useConversation((s) => s.views.get("chat"));
+  const trajectory = useTrajectory((s) => s);
+  const nodes = chat?.legacy.nodes ?? EMPTY_NODES;
+  const turnTimings = chat?.legacy.turnTimings ?? EMPTY_TURN_TIMINGS;
+  const partial = chat?.legacy.partial ?? null;
+  const runningCalls = chat?.legacy.runningCalls ?? EMPTY_RUNNING_CALLS;
   const running = useSession((s) => s.running) === true;
-  const partial = useSession((s) => s.partial);
-  const runningCalls = useSession((s) => s.runningCalls);
   const hasMore = useSession((s) => s.hasMore) === true;
   // While a generation is running, tick once per second so the live stream
   // line and elapsed timers stay current even when session events are sparse.
+  const [panel, setPanel] = useState<"overview" | "analysis" | "requests" | "agents">("overview");
   const [clock, setClock] = useState(0);
+  const [requestFilter, setRequestFilter] = useState<"all" | "error">("all");
   useEffect(() => {
     if (!running) return;
     const id = window.setInterval(() => setClock((c) => c + 1), 1000);
@@ -1316,8 +1301,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
   const goal = useProjection("goal");
   const todos = useProjection("todos");
   const board = useProjection("boardState");
-  const catalogs = useSessions((s) => s.subagentsByParent);
-  const subagents = childEntries(catalogs[sessionId]?.entries as readonly SubagentEntryLike[] | undefined);
+  const subagents = useSessions((s) => subagentEntriesOf(s, sessionId));
   const hud = useHudData({ running, runningCalls, goal, todos, board, subagentEntries: subagents });
 
   const metrics = useMemo(
@@ -1335,7 +1319,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         },
         Date.now()
       ),
-    [running, nodes, turnTimings, trajectory, tokenUsage, stats, context, pressure]
+    [running, nodes, turnTimings, trajectory, tokenUsage, stats, context, pressure, clock]
   );
 
   const hasData =
@@ -1345,40 +1329,10 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
     metrics.inputTokens > 0 ||
     metrics.roles.total > 0;
 
-  // Trajectory handoff (shared by the request table and the model timeline): a compacted marker has no callId, so anchor to the
-  // nearest tool call (see the detail comments below).
-  const findAnchor = (seq: number): RequestDetail | undefined => {
-    const own = metrics.details.find((d) => d.seq === seq);
-    if (own !== undefined && own.toolCalls.length > 0) return own;
-    const after = metrics.details
-      .filter((d) => d.seq > seq && d.toolCalls.length > 0)
-      .sort((a, b) => a.seq - b.seq)[0];
-    const before = metrics.details
-      .filter((d) => d.seq < seq && d.toolCalls.length > 0)
-      .sort((a, b) => b.seq - a.seq)[0];
-    if (after === undefined) return before;
-    if (before === undefined) return after;
-    return after.seq - seq <= seq - before.seq ? after : before;
-  };
-
+  const detailsBySeq = useMemo(() => new Map(metrics.details.map((d) => [d.seq, d])), [metrics.details]);
   const jumpTo = (seq: number): void => {
-    if (actions === undefined) return;
-    const detail = metrics.details.find((d) => d.seq === seq);
-    if (detail === undefined) return;
-    const anchor = findAnchor(seq);
-    if (anchor !== undefined) {
-      const call = anchor.toolCalls[0]!;
-      actions.select({
-        turnSeq: Math.max(1, anchor.turn),
-        stepSeq: anchor.step,
-        callId: call.callId
-      });
-      actions.setInspect({ callId: call.callId });
-    } else {
-      actions.select({ turnSeq: Math.max(1, detail.turn), stepSeq: detail.step });
-      actions.setInspect(null);
-    }
-    actions.setView("trajectory");
+    const call = detailsBySeq.get(seq)?.toolCalls[0];
+    if (call !== undefined) openView("trajectory", call.callId);
   };
 
   // Context form label (opaque fallback for producer forms this build does not know).
@@ -1392,27 +1346,16 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
       ? t(`contextForm.${f}`)
       : t("contextForm.opaque");
 
-  if (!hasData) {
-    return (
-      <div ref={bindRoot} className="dshd-root" data-conversation-composer-overlay="">
-        <div className="dshd-header">
-          <div className="dshd-title">
-            <span>{t("view.dashboard")}</span>
-          </div>
-          <span className="dshd-live" data-off={running ? undefined : true}>
-            <span className="dshd-liveDot" />
-            {running ? t("status.running") : t("status.idle")}
-          </span>
-        </div>
-        <HudStrip data={hud} t={t} />
-        <div className="dshd-empty">{t("empty")}</div>
-        <BoardBody {...props} />
-      </div>
-    );
-  }
+  const streamingBlocks = useMemo(() => extractStreamingBlocks(partial), [partial]);
+  const streamed = useMemo(() => summarizeStreamChars(streamingBlocks), [streamingBlocks]);
+  const liveItem = useMemo(() => currentStreamingItem(streamingBlocks), [streamingBlocks]);
+  const livePreview = useMemo(
+    () => compactStreamLine(liveItem?.text ?? "", STREAM_MAX_CHARS),
+    [liveItem]
+  );
 
   const tokenData: ChartDatum[] = [
-    { label: t("tokens.input"), value: Math.max(0, metrics.inputTokens - metrics.cacheReadTokens - metrics.cacheWriteTokens), color: CHART_COLORS.input },
+    { label: t("req.usage.uncached"), value: Math.max(0, metrics.inputTokens - metrics.cacheReadTokens - metrics.cacheWriteTokens), color: CHART_COLORS.input },
     { label: t("tokens.cacheRead"), value: metrics.cacheReadTokens, color: CHART_COLORS.cacheRead },
     { label: t("tokens.cacheWrite"), value: metrics.cacheWriteTokens, color: CHART_COLORS.cacheWrite },
     // Billed output as reported (may include reasoning); reasoning is shown
@@ -1437,12 +1380,12 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
       ]
     : [];
 
-  const model = metrics.series[0]?.model ?? null;
+  const model = metrics.series.find((sample) => sample.model !== null)?.model ?? null;
 
-  const toolRows = metrics.toolHistogram.slice(0, 8).map((h, i) => ({
+  const toolRows = metrics.toolHistogram.slice(0, 8).map((h) => ({
     label: h.name,
     value: h.count,
-    color: TOOL_COLORS[i % TOOL_COLORS.length] ?? CHART_COLORS.llm,
+    color: CHART_COLORS.llm,
     errorMark: h.errorCount > 0,
     sub: h.errorCount > 0 ? `${h.errorCount}/${h.count} (${Math.round((h.errorCount / Math.max(1, h.count)) * 100)}%)` : undefined
   }));
@@ -1456,7 +1399,7 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
   }));
 
   const errorRows: RowDatum[] = [
-    { label: t("stat.turnErrors"), value: metrics.anomalies.turnErrors, color: CHART_COLORS.output },
+    { label: t("stat.turnErrors"), value: metrics.anomalies.turnErrors, color: CHART_COLORS.error },
     { label: t("stat.maxTokenHits"), value: metrics.anomalies.maxTokenHits, color: CHART_COLORS.cacheWrite },
     { label: t("stat.retries"), value: metrics.anomalies.modelRetries, color: CHART_COLORS.reasoning },
     { label: t("stat.interrupted"), value: metrics.anomalies.interrupted, color: CHART_COLORS.other },
@@ -1465,13 +1408,6 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   const windowNote = `${t("role.windowNote")}${hasMore ? t("windowNote.more") : ""}`;
 
-  const streamingBlocks = useMemo(() => extractStreamingBlocks(partial), [partial]);
-  const streamed = useMemo(() => summarizeStreamChars(streamingBlocks), [streamingBlocks]);
-  const liveItem = useMemo(() => currentStreamingItem(streamingBlocks), [streamingBlocks]);
-  const livePreview = useMemo(
-    () => compactStreamLine(liveItem?.text ?? "", STREAM_MAX_CHARS),
-    [liveItem]
-  );
   const nowMs = Date.now();
   // Health signals: running requests that have been silent too long.
   const stuckRequests = metrics.series
@@ -1482,61 +1418,33 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   const maxTurnMs = Math.max(1, ...metrics.turnDurations.map((td) => td.durationMs));
 
-  // Sparkline feeds (oldest → newest window samples for the key StatCards).
-  const windowSamples = metrics.series.slice(0, 60).reverse();
-  const sparkInput = windowSamples.map((s) => s.inputTokens);
-  const sparkOutput = windowSamples.map((s) => s.outputTokens);
-  const sparkHit = windowSamples
-    .filter((s) => s.inputTokens > 0)
-    .map((s) => Math.round((s.cacheReadTokens / s.inputTokens) * 100));
-  const sparkDuration = windowSamples
-    .map((s) => s.durationMs)
-    .filter((v): v is number => v !== null);
-
-  // Sticky summary strip: core state always in view while scrolling.
-  const summary: { label: string; value: string }[] = [
-    { label: t("stat.requests"), value: exactNumber(metrics.requestCount) },
-    { label: t("stat.requests.completed"), value: exactNumber(metrics.completedRequests) },
-    { label: t("stat.requests.error"), value: exactNumber(metrics.failedRequests) }
-  ];
-  if (metrics.durationStats.p50 !== null) {
-    summary.push({ label: "P50", value: formatMs(metrics.durationStats.p50) });
-  }
-  if (metrics.compactionRequests > 0) {
-    summary.push({ label: t("stat.compactions"), value: exactNumber(metrics.compactionRequests) });
-  }
-  if (metrics.costEstimateUsd.total > 0) {
-    summary.push({ label: t("stat.cost"), value: metrics.costEstimateUsd.total <= 0 ? "—" : fmtCost(metrics.costEstimateUsd.total) });
-  }
-
+  const panels = ["overview", "analysis", "requests", "agents"] as const;
   return (
     <div ref={bindRoot} className="dshd-root" data-conversation-composer-overlay="">
-      <div className="dshd-dashboardHead">
+      <header className="dshd-dashboardHead">
         <div className="dshd-header">
-          <div className="dshd-title">
-            <span>{t("view.dashboard")}</span>
+          <span className="dshd-brandMark"><DashboardIcon name="overview" /></span>
+          <div className="dshd-headingGroup">
+            <h1 className="dshd-title">{t("view.dashboard")}</h1>
+            <span className="dshd-subtitle">{t("dashboard.subtitle")}</span>
           </div>
-          <span className="dshd-live" data-off={running ? undefined : true}>
-            <span className="dshd-liveDot" />
-            {running ? t("status.running") : t("status.idle")}
-          </span>
-          {model !== null ? <span className="dshd-chip" title={model}>{model}</span> : null}
-          {metrics.modelSwitchCount > 0 ? (
-            <span className="dshd-chip" title={t("hint.modelSwitches")}>{t("stat.modelSwitches")} ×{metrics.modelSwitchCount}</span>
-          ) : null}
           <span className="dshd-spacer" />
-          <span className="dshd-muted" style={{ fontSize: 11 }}>{windowNote}</span>
+          {model !== null && <span className="dshd-chip" title={model}>{model}</span>}
         </div>
-        <div className="dshd-summary" role="complementary" aria-label={t("section.summary")}>
-          {summary.map((s) => (
-            <span key={s.label} className="dshd-summaryItem" title={s.label}>
-              <span className="dshd-summaryLabel">{s.label}</span>
-              <span className="dshd-summaryValue">{s.value}</span>
-            </span>
+        <div className="dshd-navigation" role="group" aria-label={t("dashboard.navigation")}>
+          {panels.map((item) => (
+            <button key={item} type="button" className="dshd-navItem" aria-pressed={panel === item}
+              onClick={() => { setRequestFilter("all"); setPanel(item); rootRef.current?.scrollTo({ top: 0 }); }}>
+              <DashboardIcon name={item} />{t(`dashboard.${item}`)}
+              {item === "requests" && metrics.failedRequests > 0 && <span className="dshd-navCount" data-error="true">{metrics.failedRequests}</span>}
+              {item === "agents" && subagents.length > 0 && <span className="dshd-navCount">{subagents.length}</span>}
+            </button>
           ))}
         </div>
-      </div>
+      </header>
+      <div className="dshd-scopeNote"><span className="dshd-liveDot" data-running={running} />{running ? t("status.running") : t("status.idle")}<span>·</span>{windowNote}</div>
       <HudStrip data={hud} t={t} />
+      {!hasData && panel !== "agents" && <section className="dshd-emptyState"><DashboardIcon name="analysis" /><p>{t("empty")}</p></section>}
       {running ? (
         <div className="dshd-streamRow" role="status" aria-live="polite">
           <span className="dshd-streamDot" />
@@ -1578,84 +1486,52 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
         </div>
       ) : null}
 
-      {/* Overview */}
-      <section className="dshd-card">
-        <div className="dshd-cardHead">
-          <span className="dshd-cardTitle">{t("section.overview")}</span>
+      {panel === "overview" && hasData && <>
+      <div className="dshd-sectionIntro"><h2>{t("dashboard.overview")}</h2><span>{metrics.turns} {t("stat.turns")} · {metrics.steps} {t("stat.steps")}</span></div>
+      <section className="dshd-kpiGrid" aria-label={t("section.overview")}>
+        <div className="dshd-primaryMetric">
+          <div className="dshd-statLabel"><DashboardIcon name="requests" />{t("stat.requests")}<Hint label={t("hint.requests")} /></div>
+          <strong className="dshd-heroValue">{exactNumber(metrics.requestCount)}</strong>
+          <div className="dshd-requestBreakdown">
+            <span>{metrics.completedRequests} {t("stat.requests.completed")}</span>
+            <span>{metrics.runningRequests} {t("stat.requests.running")}</span>
+            <button type="button" data-error={metrics.failedRequests > 0} onClick={() => { setRequestFilter(metrics.failedRequests > 0 ? "error" : "all"); setPanel("requests"); }}>{metrics.failedRequests} {t("stat.requests.error")}<DashboardIcon name="arrow" /></button>
+          </div>
         </div>
-        <div className="dshd-stats">
-          <StatCard label={t("stat.turns")} value={exactNumber(metrics.turns)} hint={t("hint.turns")} />
-          <StatCard label={t("stat.steps")} value={exactNumber(metrics.steps)} hint={t("hint.steps")} />
-          <StatCard
-            label={t("stat.requests")}
-            value={exactNumber(metrics.requestCount)}
-            hint={t("hint.requests")}
-            sub={`${metrics.completedRequests} ${t("stat.requests.completed")} · ${metrics.runningRequests} ${t("stat.requests.running")} · ${metrics.failedRequests} ${t("stat.requests.error")}`}
-            tone={metrics.failedRequests > 0 ? "warn" : undefined}
-          />
-          <StatCard label={t("stat.tools")} value={exactNumber(metrics.toolCallCount)} hint={t("hint.tools")} sub={metrics.toolErrorCount > 0 ? `${metrics.toolErrorCount} ${t("stat.toolErrors")} (${Math.round((metrics.toolErrorCount / Math.max(1, metrics.toolCallCount)) * 100)}%)` : undefined} tone={metrics.toolErrorCount > 0 ? "bad" : undefined} />
-          <StatCard label={t("stat.compactions")} value={exactNumber(metrics.compactionRequests)} hint={t("hint.compactions")} />
-          <StatCard
-            label={t("stat.compactionRecovered")}
-            value={metrics.compactionRecoveredTokens === null ? t("unknown") : compactNumber(metrics.compactionRecoveredTokens)}
-            hint={t("hint.compactionRecovered")}
-            sub={metrics.compactionRequests > 0 ? `${compactNumber(metrics.compactionRequests)} ${t("stat.compactions")}${metrics.compactionRecoveredItems === null ? "" : ` · ${compactNumber(metrics.compactionRecoveredItems)} ${t("stat.compactionItems")}`}` : undefined}
-          />
-          <StatCard label={t("stat.modelSwitches")} value={exactNumber(metrics.modelSwitchCount)} hint={t("hint.modelSwitches")} />
-          <StatCard
-            label={t("stat.cost")}
-            value={metrics.costEstimateUsd.total <= 0 ? "—" : fmtCost(metrics.costEstimateUsd.total)}
-            hint={t("hint.cost")}
-            sub={metrics.costEstimateUsd.cacheSavings > 0 ? `${t("stat.costSavings")} ${fmtCost(metrics.costEstimateUsd.cacheSavings)}` : undefined}
-          />
-          <StatCard
-            label={t("stat.totalDuration")}
-            value={formatMs(metrics.totalDurationMs)}
-            hint={t("hint.totalDuration")}
-            spark={{ values: sparkDuration, color: CHART_COLORS.reasoning, title: t("trend.newestRight") }}
-          />
-          <StatCard
-            label={t("stat.avgTtft")}
-            value={metrics.avgTtftMs === null ? t("unknown") : formatMs(metrics.avgTtftMs)}
-            hint={t("hint.avgTtft")}
-            sub={metrics.ttftSteps > 0 ? `${metrics.ttftSteps} ${t("timing.ttft")} · ${t("stat.scopeAll")}` : undefined}
-          />
-          <StatCard
-            label={t("stat.decodeSpeed")}
-            value={metrics.decodeTokensPerSec === null ? t("unknown") : `${Math.round(metrics.decodeTokensPerSec)} ${t("unit.tps")}`}
-            hint={t("hint.decodeSpeed")}
-            sub={`${compactNumber(metrics.decodeTokens)} ${t("trend.output")} / ${formatMs(metrics.decodeMs)} · ${t("stat.scopeAll")}`}
-          />
-        </div>
+        <StatCard label={t("stat.cost")} value={fmtCost(metrics.costEstimateUsd.total)} hint={t("hint.cost")}
+          sub={metrics.costEstimateUsd.unpricedRequests > 0 ? t("dashboard.unpriced").replace("{n}", String(metrics.costEstimateUsd.unpricedRequests)) : t("dashboard.costNote")} />
+        <StatCard label={t("stat.avgTtft")} value={metrics.avgTtftMs === null ? t("unknown") : formatMs(metrics.avgTtftMs)} hint={t("hint.avgTtft")}
+          sub={t("dashboard.latencyNote")} />
+        <StatCard label={t("stat.decodeSpeed")} value={metrics.decodeTokensPerSec === null ? t("unknown") : `${Math.round(metrics.decodeTokensPerSec)} ${t("unit.tps")}`} hint={t("hint.decodeSpeed")}
+          sub={t("dashboard.speedNote")} />
       </section>
-
       {/* Token usage */}
       <section className="dshd-card">
         <div className="dshd-cardHead">
           <span className="dshd-cardTitle">{t("section.tokens")}</span>
-          <span className="dshd-cardHint">{t("tokens.formula")} · {t("tokens.cacheNote")}</span>
+          <Hint label={`${t("tokens.formula")} · ${t("tokens.cacheNote")}`} />
         </div>
-        <div className="dshd-stats">
-          <StatCard label={t("stat.inputTokens")} value={exactNumber(metrics.inputTokens)} hint={t("hint.inputTokens")} tone="accent" spark={{ values: sparkInput, color: CHART_COLORS.input, title: t("trend.newestRight") }} />
-          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} sub={metrics.reasoningTokens > 0 ? `${t("tokens.reasoning")} ${compactNumber(metrics.reasoningTokens)} (${t("role.windowNote")})` : undefined} spark={{ values: sparkOutput, color: CHART_COLORS.output, title: t("trend.newestRight") }} />
-          <StatCard
+        <div className="dshd-tokenStats">
+          <StatCard label={t("stat.inputTokens")} value={exactNumber(metrics.inputTokens)} hint={t("hint.inputTokens")} />
+          <StatCard label={t("stat.outputTokens")} value={exactNumber(metrics.outputTokens)} hint={t("hint.outputTokens")} sub={metrics.reasoningTokens > 0 ? `${t("tokens.reasoning")} ${compactNumber(metrics.reasoningTokens)} (${t("role.windowNote")})` : undefined} />
+          {metrics.reasoningTokens > 0 && <StatCard
             label={t("stat.reasoningTokens")}
             value={exactNumber(metrics.reasoningTokens)}
             hint={t("hint.reasoningTokens")}
             sub={metrics.windowOutputTokens > 0 ? `${t("stat.reasoningShare")} ${Math.round((metrics.reasoningTokens / metrics.windowOutputTokens) * 100)}% (${t("role.windowNote")})` : undefined}
-            tone={metrics.reasoningTokens > 0 ? "reasoning" : undefined}
-          />
-          <StatCard label={t("stat.cacheHitRate")} value={metrics.cacheHitPercent === null ? t("unknown") : `${metrics.cacheHitPercent}${t("unit.percent")}`} hint={t("hint.cacheHitRate")} tone={metrics.cacheHitPercent !== null && metrics.cacheHitPercent >= 60 ? "good" : metrics.cacheHitPercent !== null && metrics.cacheHitPercent > 0 ? "accent" : undefined} sub={metrics.cacheHitPercent === null ? undefined : `${t("stat.cacheRead")} ${compactNumber(metrics.cacheReadTokens)} / ${t("stat.inputTokens")} ${compactNumber(metrics.inputTokens)}`} spark={{ values: sparkHit, color: CHART_COLORS.cacheRead, title: t("trend.newestRight") }} />
+            tone="reasoning"
+          />}
+          <StatCard label={t("stat.cacheHitRate")} value={metrics.cacheHitPercent === null ? t("unknown") : `${metrics.cacheHitPercent}${t("unit.percent")}`} hint={t("hint.cacheHitRate")} sub={metrics.cacheHitPercent === null ? undefined : `${t("stat.cacheRead")} ${compactNumber(metrics.cacheReadTokens)} / ${t("stat.inputTokens")} ${compactNumber(metrics.inputTokens)}`} />
         </div>
         <StackedBar data={tokenData} valueFormatter={(v) => exactNumber(v)} height={20} totalLabel={t("total")} />
       </section>
 
-      <div className="dshd-grid2">
+      <div className="dshd-grid2 dshd-overviewGrid">
         {/* Context pressure gauge + composition */}
         <section className="dshd-card">
           <div className="dshd-cardHead">
             <span className="dshd-cardTitle">{t("stat.contextOccupancy")}</span>
-            <span className="dshd-cardHint">{t("hint.contextOccupancy")}</span>
+            <Hint label={t("hint.contextOccupancy")} />
           </div>
           {metrics.pressure?.projectedTokens === undefined || metrics.pressure.contextWindow === undefined ? (
             <div className="dshd-empty" style={{ padding: "22px 0" }}>{t("context.pressureMissing")}</div>
@@ -1677,51 +1553,6 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
                 ) : (
                   <StackedBar data={contextData} valueFormatter={(v) => exactNumber(v)} height={20} totalLabel={t("total")} />
                 )}
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Context-injection sources */}
-        {metrics.contextInjection.length > 0 ? (
-          <section className="dshd-card">
-            <div className="dshd-cardHead">
-              <span className="dshd-cardTitle">{t("section.contextInjection")}</span>
-              <span className="dshd-cardHint">{t("hint.contextInjection")}</span>
-            </div>
-            <div className="dshd-col">
-              {metrics.contextInjection.map((c) => (
-                <div
-                  key={`${c.label}${c.form}`}
-                  className="dshd-errRow"
-                  title={`${c.role === "recall" ? t("contextRole.recall") : t("contextRole.inject")} · ${formLabel(c.form)}`}
-                >
-                  <span className="dshd-errMsg">
-                    {c.label}
-                    <span className="dshd-formBadge" data-f={c.form}>{formLabel(c.form)}</span>
-                  </span>
-                  <span className="dshd-errCount">
-                    ×{c.count} · {compactNumber(c.chars)} {t("unit.char")}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {/* Messages */}
-        <section className="dshd-card">
-          <div className="dshd-cardHead">
-            <span className="dshd-cardTitle">{t("section.messages")}</span>
-            <span className="dshd-cardHint">{windowNote}</span>
-          </div>
-          {metrics.roles.total === 0 ? (
-            <div className="dshd-empty">{t("unknown")}</div>
-          ) : (
-            <div className="dshd-donutRow">
-              <DonutChart data={roleData} centerValue={String(metrics.roles.total)} centerLabel={t("section.messages")}  ariaLabel={t("aria.donut")} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <Legend data={roleData} percent />
               </div>
             </div>
           )}
@@ -1798,11 +1629,17 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
           ) : null}
         </section>
 
+      </div>
+      </>}
+      {panel === "analysis" && hasData && <>
+      <div className="dshd-sectionIntro"><h2>{t("dashboard.analysis")}</h2><span>{t("dashboard.analysisNote")}</span></div>
+      <div className="dshd-grid2 dshd-analysisGrid">
+        <div className="dshd-col">
         {/* Turn durations */}
         <section className="dshd-card">
           <div className="dshd-cardHead">
             <span className="dshd-cardTitle">{t("section.turns")}</span>
-            <span className="dshd-cardHint">{t("hint.turnDurations")}</span>
+            <Hint label={t("hint.turnDurations")} />
           </div>
           {metrics.turnDurations.length === 0 ? (
             <div className="dshd-empty" style={{ padding: "18px 0" }}>{t("unknown")}</div>
@@ -1824,43 +1661,17 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
           ) : null}
         </section>
 
-        {/* Tool histogram */}
-        <section className="dshd-card">
-          <div className="dshd-cardHead">
-            <span className="dshd-cardTitle">{t("section.tools")}</span>
-            <span className="dshd-cardHint">{t("tools.note")}</span>
-          </div>
-          <HorizontalBars data={toolRows} valueFormatter={(v) => exactNumber(v)} />
-          {metrics.toolHistogram.length > 8 ? (
-            <div className="dshd-muted" style={{ fontSize: 11 }}>{t("req.toolTail").replace("{n}", String(metrics.toolHistogram.length - 8))}</div>
-          ) : null}
-          {metrics.toolDurationTop.length > 0 ? (
-            <div className="dshd-col">
-              <div className="dshd-subTitle">{t("tools.durationTop")}</div>
-              <HorizontalBars
-                data={metrics.toolDurationTop.slice(0, 5).map((r, i) => ({
-                  label: r.name,
-                  value: r.totalMs,
-                  color: TOOL_COLORS[i % TOOL_COLORS.length] ?? CHART_COLORS.llm,
-                  sub: `${t("tools.avgDuration")} ${formatMs(r.avgMs)} · ${r.calls}`
-                }))}
-                valueFormatter={(v) => formatMs(v)}
-              />
-            </div>
-          ) : null}
-        </section>
-
         {/* Model usage */}
         <section className="dshd-card">
           <div className="dshd-cardHead">
             <span className="dshd-cardTitle">{t("section.models")}</span>
-            <span className="dshd-cardHint">{t("hint.modelTimeline")}</span>
+            <span className="dshd-cardHint">{metrics.modelSwitchCount} {t("stat.modelSwitches")}</span><Hint label={t("hint.modelTimeline")} />
           </div>
           <HorizontalBars data={modelRows} valueFormatter={(v) => exactNumber(v)} subBelow />
-          {metrics.modelSplit.length > 1 ? (
+          {metrics.modelSplit.length > 1 && metrics.modelSplit.every((m) => m.costUsd !== null) ? (
             <div style={{ marginTop: 8 }}>
               <StackedBar
-                data={metrics.modelSplit.map((m) => ({ label: m.model, value: m.costUsd, color: modelColor(m.model) }))}
+                data={metrics.modelSplit.map((m) => ({ label: m.model, value: m.costUsd ?? 0, color: modelColor(m.model) }))}
                 valueFormatter={(v) => fmtCost(v)}
                 height={20}
                 totalLabel={t("section.modelCost")}
@@ -1874,10 +1685,97 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
                 data={metrics.modelTimeline}
                 switchSeqs={metrics.modelSwitchSeqs}
                 emptyLabel={t("empty.requests")}
-                onPick={actions !== undefined ? (seq) => jumpTo(seq) : undefined}
+                onPick={openView !== undefined ? (seq) => jumpTo(seq) : undefined}
                 note={metrics.modelTimeline.length > 60 ? `${t("trend.scopeNote")} 60 ${t("pager.items")}` : undefined}
                 axisHint={t("trend.axisOldToNew")}
                 ariaLabel={t("aria.modelTimeline")}
+              />
+            </div>
+          ) : null}
+        </section>
+
+        {/* Reasoning effort distribution */}
+        {metrics.effortStats.some((e) => e.reasoningTokens > 0 || e.effort !== "default") ? (
+          <section className="dshd-card">
+            <div className="dshd-cardHead">
+              <span className="dshd-cardTitle">{t("section.effort")}</span>
+            </div>
+            <div className="dshd-col">
+              {metrics.effortStats.map((e) => (
+                <div key={e.effort} className="dshd-errRow" title={t("hint.effort")}>
+                  <span className="dshd-errMsg">{e.effort}</span>
+                  <span className="dshd-errCount">
+                    {exactNumber(e.requests)} · {compactNumber(e.reasoningTokens)} {t("tokens.reasoning")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {/* Context-injection sources */}
+        {metrics.contextInjection.length > 0 ? (
+          <section className="dshd-card">
+            <div className="dshd-cardHead">
+              <span className="dshd-cardTitle">{t("section.contextInjection")}</span>
+              <Hint label={t("hint.contextInjection")} />
+            </div>
+            <div className="dshd-col">
+              {metrics.contextInjection.map((c) => (
+                <div
+                  key={`${c.label}${c.form}`}
+                  className="dshd-errRow"
+                  title={`${c.role === "recall" ? t("contextRole.recall") : t("contextRole.inject")} · ${formLabel(c.form)}`}
+                >
+                  <span className="dshd-errMsg">
+                    {c.label}
+                    <span className="dshd-formBadge" data-f={c.form}>{formLabel(c.form)}</span>
+                  </span>
+                  <span className="dshd-errCount">
+                    ×{c.count} · {compactNumber(c.chars)} {t("unit.char")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {/* Messages */}
+        <section className="dshd-card">
+          <div className="dshd-cardHead">
+            <span className="dshd-cardTitle">{t("section.messages")}</span>
+            <span className="dshd-cardHint">{windowNote}</span>
+          </div>
+          {metrics.roles.total === 0 ? (
+            <div className="dshd-empty">{t("unknown")}</div>
+          ) : (
+            <HorizontalBars data={roleData} valueFormatter={(v) => exactNumber(v)} />
+          )}
+        </section>
+
+        </div>
+        <div className="dshd-col">
+        {/* Tool histogram */}
+        <section className="dshd-card">
+          <div className="dshd-cardHead">
+            <span className="dshd-cardTitle">{t("section.tools")}</span>
+            <span className="dshd-cardHint">{exactNumber(metrics.toolCallCount)} {t("stat.tools")}</span><Hint label={t("tools.note")} />
+          </div>
+          <HorizontalBars data={toolRows} valueFormatter={(v) => exactNumber(v)} />
+          {metrics.toolHistogram.length > 8 ? (
+            <div className="dshd-muted" style={{ fontSize: 11 }}>{t("req.toolTail").replace("{n}", String(metrics.toolHistogram.length - 8))}</div>
+          ) : null}
+          {metrics.toolDurationTop.length > 0 ? (
+            <div className="dshd-col">
+              <div className="dshd-subTitle">{t("tools.durationTop")}</div>
+              <HorizontalBars
+                data={metrics.toolDurationTop.slice(0, 5).map((r) => ({
+                  label: r.name,
+                  value: r.totalMs,
+                  color: CHART_COLORS.llm,
+                  sub: `${t("tools.avgDuration")} ${formatMs(r.avgMs)} · ${r.calls}`
+                }))}
+                valueFormatter={(v) => formatMs(v)}
               />
             </div>
           ) : null}
@@ -1958,31 +1856,12 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
           </section>
         ) : null}
 
-        {/* Reasoning effort distribution */}
-        {metrics.effortStats.length > 0 ? (
-          <section className="dshd-card">
-            <div className="dshd-cardHead">
-              <span className="dshd-cardTitle">{t("section.effort")}</span>
-            </div>
-            <div className="dshd-col">
-              {metrics.effortStats.map((e) => (
-                <div key={e.effort} className="dshd-errRow" title={t("hint.effort")}>
-                  <span className="dshd-errMsg">{e.effort}</span>
-                  <span className="dshd-errCount">
-                    {exactNumber(e.requests)} · {compactNumber(e.reasoningTokens)} {t("tokens.reasoning")}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
         {/* Agent-health diagnostics: loops / no-progress / tool storm */}
         {metrics.loops.length > 0 || metrics.noProgress.length > 0 || metrics.toolStorm.some((b) => b.calls > 0) ? (
           <section className="dshd-card">
             <div className="dshd-cardHead">
               <span className="dshd-cardTitle">{t("section.health")}</span>
-              <span className="dshd-cardHint">{t("hint.health")}</span>
+              <Hint label={t("hint.health")} />
             </div>
             <div className="dshd-col">
               {metrics.loops.map((l) => (
@@ -2019,19 +1898,20 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             ) : null}
           </section>
         ) : null}
+        </div>
       </div>
+      </>}
 
       {/* Request trend */}
-      <section className="dshd-card">
+      {panel === "requests" && hasData && <section className="dshd-card dshd-requestCard">
         <div className="dshd-cardHead">
-          <span className="dshd-cardTitle">{t("section.trend")}</span>
-          <span className="dshd-cardHint">{actions !== undefined ? t("req.rowHint.jump") : t("req.rowHint.expand")}</span>
+          <span className="dshd-cardTitle">{t("section.requests")}</span>
+          <span className="dshd-cardHint">{t("req.rowHint.expand")}</span>
         </div>
-        <TrendSection metrics={metrics} t={t} actions={actions} jumpTo={jumpTo} />
-      </section>
+        <TrendSection metrics={metrics} t={t} onJump={jumpTo} jumpTo={jumpTo} initialFilter={requestFilter} />
+      </section>}
 
-      {/* Subagent status: direct-child catalog folded from the session runtime. */}
-      <BoardBody {...props} />
+      {panel === "agents" && <section className="dshd-agentPanel"><BoardBody {...props} /></section>}
     </div>
   );
 }

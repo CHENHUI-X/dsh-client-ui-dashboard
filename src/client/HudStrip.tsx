@@ -132,25 +132,11 @@ function Chip(props: {
 /** The HUD strip. `t` is the view's bound locale function. */
 export function HudStrip(props: { data: HudData; t: (key: DashboardLocaleKey) => string }): JSX.Element {
   const { data, t } = props;
-  const nowMs = Date.now();
-  const goal = data.goal;
+  const goal = data.goal ?? null;
   const goalTone =
     goal === null ? "idle" : goal.goal.phase === "blocked" ? "bad" : goal.goal.phase === "active" ? "accent" : "idle";
   return (
-    <div className="dshd-hud" role="status">
-      <Chip
-        tone={data.running ? "accent" : "idle"}
-        label={t("hud.status")}
-        value={data.running ? t("hud.status.running") : t("hud.status.idle")}
-      />
-      {data.currentTool !== null && (
-        <Chip
-          tone="accent"
-          label={t("hud.tool")}
-          value={data.currentTool.name}
-          quietSuffix={` · ${elapsedLabel(data.currentTool.time, nowMs)}`}
-        />
-      )}
+    <div className="dshd-hud" role="status" data-empty={goal === null && data.inProgressTodos === 0 && data.runningSubagents === 0 && data.runningWorkflow === 0 && data.nextSchedule === null}>
       {goal !== null && (
         <Chip tone={goalTone} label={t("hud.goal")} value={goalShortLabel(t, goal)} />
       )}
