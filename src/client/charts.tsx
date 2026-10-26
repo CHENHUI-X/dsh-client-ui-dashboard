@@ -31,6 +31,7 @@ export function exactNumber(n: number): string {
 /** Format ms as 45.2s / 2m42s / 1h05m. */
 export function formatMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "—";
+  if (ms > 0 && ms < 1000) return `${Math.round(ms)}ms`;
   const s = ms / 1000;
   if (s < 60) return `${Math.round(s * 10) / 10}s`;
   const whole = Math.round(s);

@@ -17,8 +17,9 @@ import { deriveMetrics, requestSeries, compactionEffect, modelSplit } from './sr
 import { foldBoard } from './src/board/fold';
 import { EMPTY_BOARD } from './src/board/types';
 import { subagentEntriesOf } from './src/client/board';
-import { DashboardView } from './src/client/DashboardView';
+import { DashboardView, ToolAnalysis } from './src/client/DashboardView';
 import { HudStrip } from './src/client/HudStrip';
+import { formatMs } from './src/client/charts';
 import { zh, en } from './src/client/locales';
 
 const request = (seq, extra = {}) => ({
@@ -75,6 +76,20 @@ test('direct dashboard entry subscribes to requests and renders absent projectio
   assert.match(markup, /dshd-activitySample" data-status="error"/);
   assert.match(markup, /性能与成本/);
   assert.ok(!markup.includes('<table'));
+  assert.ok(!markup.includes('data-conversation-composer-overlay'));
+  const tools = renderToStaticMarkup(<ToolAnalysis t={props.t} metrics={{ ...deriveMetrics(input, 5000),
+    toolHistogram: [{name: 'bash', count: 135, errorCount: 0}, {name: 'ask_user_question', count: 2, errorCount: 0}, {name: 'untimed', count: 1, errorCount: 0}],
+    toolDurationTop: [{name: 'bash', totalMs: 127000, avgMs: 940, calls: 135}, {name: 'ask_user_question', totalMs: 3043000, avgMs: 1521500, calls: 2}, {name: 'timed_only', totalMs: 500, avgMs: 500, calls: 1}]
+  }} />);
+  const body = tools.split('<tbody>')[1].split('</tbody>')[0];
+  assert.ok(body.indexOf('ask_user_question') < body.indexOf('bash'));
+  assert.match(body, /含用户等待/);
+  assert.match(body, /timed_only<[^]*?<td>—</);
+  assert.match(body, /untimed<[^]*?dshd-toolDuration[^]*?>—</);
+  assert.ok(!tools.includes('dshd-toolShare'));
+  assert.match(tools, /不是会话实际时长/);
+  assert.equal(formatMs(12), '12ms');
+  assert.match(body, /500ms/);
   renderToStaticMarkup(<DashboardView {...props} useSession={select => select({ running: true })} />);
   renderToStaticMarkup(<DashboardView {...props} useTrajectory={select => select({ requests: [] })} />);
   renderToStaticMarkup(<HudStrip t={props.t} data={{ running: true, goal: undefined, currentTool: null, inProgressTodos: 0, runningWorkflow: 0, runningSubagents: 0, nextSchedule: null, nextScheduleOverdue: false }} />);

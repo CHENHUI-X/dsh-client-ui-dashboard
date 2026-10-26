@@ -1255,13 +1255,66 @@ function RequestActivity({ samples, t }: { samples: readonly RequestSample[]; t:
   );
 }
 
+/** Tool wall times are cumulative samples, not the session's elapsed time. */
+export function ToolAnalysis({ metrics, t }: { metrics: DashboardMetrics; t: DashboardViewProps["t"] }): JSX.Element {
+  const counts = new Map(metrics.toolHistogram.map((row) => [row.name, row]));
+  const timings = new Map(metrics.toolDurationTop.map((row) => [row.name, row]));
+  const tools = [...new Set([...counts.keys(), ...timings.keys()])].map((name) => ({
+    name, count: counts.get(name), timing: timings.get(name)
+  })).sort((a, b) => (b.timing?.totalMs ?? -1) - (a.timing?.totalMs ?? -1) || (b.count?.count ?? 0) - (a.count?.count ?? 0));
+  const timed = tools.filter((row) => row.timing !== undefined && row.timing.totalMs > 0);
+  const totalMs = timed.reduce((total, row) => total + row.timing!.totalMs, 0);
+  const hasErrors = tools.some((row) => (row.count?.errorCount ?? 0) > 0);
+  const questionMs = timed.find((row) => row.name === "ask_user_question")?.timing?.totalMs ?? 0;
+  const allocation = [
+    { label: t("analysis.interactive"), value: questionMs, color: "var(--dshd-wait-fill)" },
+    { label: t("analysis.otherTools"), value: totalMs - questionMs, color: "var(--dshd-teal)" }
+  ].filter((row) => row.value > 0);
+
+  return <section className="dshd-toolAnalysis">
+    <div className="dshd-analysisHeading">
+      <div><h2>{t("analysis.focusTitle")}</h2><p>{t("analysis.toolSummary").replace("{calls}", exactNumber(metrics.toolCallCount)).replace("{tools}", String(tools.length))}</p></div>
+      <Hint label={t("analysis.timingScope")} />
+    </div>
+    {timed.length > 0 && <div className="dshd-timeOverview">
+      <div className="dshd-timeTotal"><span>{t("analysis.cumulativeTime")}</span><strong>{formatMs(totalMs)}</strong></div>
+      <div className="dshd-allocation">
+        <div className="dshd-allocationBar" role="img" aria-label={t("analysis.allocation")}>
+          {allocation.map((row) => <span key={row.label} title={`${row.label}: ${formatMs(row.value)}`}
+            style={{ flex: row.value, background: row.color }} />)}
+        </div>
+        <div className="dshd-allocationLegend">{allocation.map((row) => <span key={row.label}>
+          <i style={{ background: row.color }} /><span>{row.label}</span><b>{formatMs(row.value)}</b>
+        </span>)}</div>
+      </div>
+    </div>}
+    {tools.length > 0 ? <div className="dshd-analysisTableScroll" tabIndex={0} role="region" aria-label={t("section.tools")}>
+      <table className="dshd-analysisTable">
+        <thead><tr>
+          <th scope="col">{t("analysis.toolName")}</th>
+          <th scope="col" aria-sort="descending" title={t("analysis.orderedByTime")}>{t("analysis.totalTime")} ↓</th>
+          <th scope="col">{t("analysis.calls")}</th>
+          <th scope="col">{t("analysis.avgTime")}</th>
+          {hasErrors && <th scope="col">{t("stat.requests.error")}</th>}
+        </tr></thead>
+        <tbody>{tools.map((row) => <tr key={row.name} data-waiting={row.name === "ask_user_question"}>
+          <th scope="row"><span className="dshd-toolName">{row.name}</span>{row.name === "ask_user_question" && <span className="dshd-waitingLabel">{t("analysis.includesWaiting")}</span>}</th>
+          <td className="dshd-toolDuration" title={row.timing ? `${row.timing.calls} ${t("analysis.timedCalls")}` : undefined}>{row.timing ? formatMs(row.timing.totalMs) : "—"}</td>
+          <td>{row.count ? exactNumber(row.count.count) : "—"}</td>
+          <td>{row.timing ? formatMs(row.timing.avgMs) : "—"}</td>
+          {hasErrors && <td data-error={(row.count?.errorCount ?? 0) > 0}>{row.count?.errorCount ?? "—"}</td>}
+        </tr>)}</tbody>
+      </table>
+    </div> : <div className="dshd-muted">{t("analysis.noTools")}</div>}
+    <div className="dshd-analysisFootnote"><span className="dshd-analysisScrollHint">{t("analysis.scrollTable")} </span>{t("analysis.timingScope")}</div>
+  </section>;
+}
+
 /** The dashboard conversation-view entry. */
 export function DashboardView(props: DashboardViewProps): JSX.Element {
   const { useSession, useConversation, useTrajectory, useProjection, useSessions, t, openView, sessionId } = props;
-  // ── 看板自持滚动容器 + 按会话滚动记忆 ──────────────────────────────────
-  // 根元素声明 data-conversation-composer-overlay 后，会话列共享滚动体
-  // 让位（与轨迹视图同款官方模式），本视图拥有自己的滚动条，切换 tab
-  // 不会带跑对话/轨迹的滚动位置。滚动记忆见模块级 scrollMemory。
+  // The bounded scrollport reserves the host composer's measured height;
+  // the dashboard never opts into the host's floating-composer overlay mode.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollHandlerRef = useRef<((ev: Event) => void) | null>(null);
   const restoringRef = useRef(false);
@@ -1405,9 +1458,6 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   const model = metrics.series.find((sample) => sample.model !== null)?.model ?? null;
 
-  const toolDurations = new Map(metrics.toolDurationTop.map((row) => [row.name, row]));
-  const maxToolCalls = Math.max(1, ...metrics.toolHistogram.map((row) => row.count));
-
   const errorRows: RowDatum[] = [
     { label: t("stat.turnErrors"), value: metrics.anomalies.turnErrors, color: CHART_COLORS.error },
     { label: t("stat.maxTokenHits"), value: metrics.anomalies.maxTokenHits, color: CHART_COLORS.cacheWrite },
@@ -1430,19 +1480,11 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
 
   const panels = ["overview", "analysis", "requests", "agents"] as const;
   return (
-    <div ref={bindRoot} className="dshd-root" data-panel={panel} data-conversation-composer-overlay="">
+    <div ref={bindRoot} className="dshd-root" data-panel={panel}>
       <header className="dshd-dashboardHead">
         <div className="dshd-header">
           <span className="dshd-brandMark"><DashboardIcon name="pulse" /></span>
-          <div className="dshd-headingGroup">
-            <h1 className="dshd-title">{t("dashboard.title")}</h1>
-            <span className="dshd-subtitle">{t("dashboard.subtitle")}</span>
-          </div>
-          <span className="dshd-spacer" />
-          <div className="dshd-headerContext">
-            <span className="dshd-sessionState" data-running={running}><span />{running ? t("hud.status.running") : t("hud.status.idle")}</span>
-            {model !== null && <span className="dshd-modelBadge" title={model}>{model}</span>}
-          </div>
+          <h1 className="dshd-title">{t("dashboard.title")}</h1>
         </div>
         <div className="dshd-navigation" role="group" aria-label={t("dashboard.navigation")}>
           {panels.map((item) => (
@@ -1454,8 +1496,12 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             </button>
           ))}
         </div>
+        <div className="dshd-headerContext">
+          <span className="dshd-sessionState" data-running={running}><span />{running ? t("hud.status.running") : t("hud.status.idle")}</span>
+          {model !== null && <span className="dshd-modelBadge" title={model}>{model}</span>}
+        </div>
       </header>
-      <HudStrip data={hud} t={t} />
+      {(panel === "overview" || panel === "agents") && <HudStrip data={hud} t={t} />}
       {!hasData && panel !== "agents" && <section className="dshd-emptyState"><DashboardIcon name="analysis" /><p>{t("empty")}</p></section>}
       {running ? (
         <div className="dshd-streamRow" role="status" aria-live="polite">
@@ -1652,42 +1698,18 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
       </div>
       </>}
       {panel === "analysis" && hasData && <>
-      <div className="dshd-sectionIntro"><h2>{t("dashboard.analysis")}</h2><span>{windowNote}</span></div>
-      <div className="dshd-analysisGrid">
-        <section className="dshd-card dshd-toolAnalysis">
+      <div className="dshd-analysisContext">
+        <span>{t("analysis.loadedWindow")}<Hint label={windowNote} /></span>
+        <span>{exactNumber(metrics.requestCount)} {t("models.requests")}</span>
+        {metrics.retriedRequests > 0 && <span>{metrics.retriedRequests} {t("analysis.retries")}</span>}
+        {metrics.failedRequests > 0 && <button type="button" onClick={() => { setRequestFilter("error"); setPanel("requests"); }}>{t("analysis.inspectErrors").replace("{n}", String(metrics.failedRequests))}<DashboardIcon name="requests" /></button>}
+      </div>
+      <div className="dshd-analysisWorkspace">
+        <ToolAnalysis metrics={metrics} t={t} />
+        <aside className="dshd-modelAnalysis">
           <div className="dshd-cardHead">
-            <span className="dshd-cardTitle">{t("section.tools")}</span>
-            <span className="dshd-cardHint">{t("analysis.toolSummary").replace("{calls}", exactNumber(metrics.toolCallCount)).replace("{tools}", String(metrics.toolHistogram.length))}</span>
-            <Hint label={t("tools.note")} />
-          </div>
-          {metrics.toolHistogram.length > 0 ? <div className="dshd-analysisTableScroll" tabIndex={0} role="region" aria-label={t("section.tools")}>
-            <table className="dshd-analysisTable">
-              <thead><tr>
-                <th scope="col">{t("analysis.toolName")}</th>
-                <th scope="col">{t("analysis.calls")}</th>
-                <th scope="col">{t("stat.requests.error")}</th>
-                <th scope="col">{t("analysis.totalTime")}</th>
-                <th scope="col">{t("analysis.avgTime")}</th>
-              </tr></thead>
-              <tbody>{metrics.toolHistogram.map((row) => {
-                const timing = toolDurations.get(row.name);
-                return <tr key={row.name}>
-                  <th scope="row"><span className="dshd-toolName">{row.name}</span></th>
-                  <td><span className="dshd-callVolume"><span className="dshd-toolShare" aria-hidden="true"><span style={{ width: `${row.count / maxToolCalls * 100}%` }} /></span>{exactNumber(row.count)}</span></td>
-                  <td data-error={row.errorCount > 0}>{row.errorCount > 0 ? exactNumber(row.errorCount) : <span className="dshd-muted">0</span>}</td>
-                  <td title={timing ? `${timing.calls} ${t("analysis.timedCalls")}` : undefined}>{timing ? formatMs(timing.totalMs) : "—"}</td>
-                  <td>{timing ? formatMs(timing.avgMs) : "—"}</td>
-                </tr>;
-              })}</tbody>
-            </table>
-          </div> : <div className="dshd-muted">{t("analysis.noTools")}</div>}
-          <div className="dshd-analysisFootnote"><span className="dshd-analysisScrollHint">{t("analysis.scrollTable")} </span>{t("analysis.toolTimingNote")}</div>
-        </section>
-
-        <section className="dshd-card dshd-modelAnalysis">
-          <div className="dshd-cardHead">
-            <span className="dshd-cardTitle">{t("section.models")}</span>
-            <span className="dshd-cardHint">{metrics.modelSwitchCount} {t("stat.modelSwitches")}</span>
+            <span className="dshd-cardTitle">{t("analysis.modelsTitle")}</span>
+            {metrics.modelSwitchCount > 0 && <span className="dshd-cardHint">{metrics.modelSwitchCount} {t("stat.modelSwitches")}</span>}
           </div>
           <div className="dshd-modelList">
             {metrics.modelSplit.length === 0 && <div className="dshd-muted">{t("empty.requests")}</div>}
@@ -1696,12 +1718,12 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
               <div className="dshd-modelProvider">{row.provider}</div>
               <dl className="dshd-modelFacts">
                 <div><dt>{t("models.requests")}</dt><dd>{exactNumber(row.requests)}</dd></div>
-                <div><dt>{t("stat.requests.error")}</dt><dd data-error={row.errorCount > 0}>{row.errorCount}</dd></div>
+                {row.errorCount > 0 && <div><dt>{t("stat.requests.error")}</dt><dd data-error="true">{row.errorCount}</dd></div>}
                 <div><dt>{t("stat.inputTokens")}</dt><dd title={exactNumber(row.inputTokens)}>{compactNumber(row.inputTokens)}</dd></div>
                 <div><dt>{t("stat.outputTokens")}</dt><dd title={exactNumber(row.outputTokens)}>{compactNumber(row.outputTokens)}</dd></div>
-                <div><dt>{t("analysis.avgTime")}</dt><dd>{row.avgDurationMs === null ? "—" : formatMs(row.avgDurationMs)}</dd></div>
-                <div><dt>{t("stat.avgTtft")}</dt><dd>{row.avgTtftMs === null ? "—" : formatMs(row.avgTtftMs)}</dd></div>
-                <div><dt>{t("stat.cost")} <Hint label={t("hint.cost")} /></dt><dd>{fmtCost(row.costUsd)}</dd></div>
+                <div><dt>{t("analysis.avgTime")}</dt><dd data-missing={row.avgDurationMs === null}>{row.avgDurationMs === null ? t("analysis.notReported") : formatMs(row.avgDurationMs)}</dd></div>
+                <div><dt>{t("stat.avgTtft")}</dt><dd data-missing={row.avgTtftMs === null}>{row.avgTtftMs === null ? t("analysis.notReported") : formatMs(row.avgTtftMs)}</dd></div>
+                <div><dt>{t("stat.cost")} <Hint label={t("hint.cost")} /></dt><dd data-missing={row.costUsd === null}>{row.costUsd === null ? t("analysis.notPriced") : fmtCost(row.costUsd)}</dd></div>
               </dl>
             </div>)}
           </div>
@@ -1719,8 +1741,9 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             axisHint={t("trend.axisOldToNew")}
             ariaLabel={t("aria.modelTimeline")}
           />}
-        </section>
-
+        </aside>
+      </div>
+      <div className="dshd-analysisSupport">
         <section className="dshd-card">
           <div className="dshd-cardHead">
             <span className="dshd-cardTitle">{t("section.turns")}</span>
@@ -1765,6 +1788,10 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
           </div>)}</div>
         </section>}
 
+      </div>
+      <details className="dshd-analysisDiagnostics">
+        <summary>{t("analysis.diagnostics")}<span>{t("analysis.diagnosticsNote")}</span><DashboardIcon name="chevron" /></summary>
+        <div className="dshd-analysisDiagnosticGrid">
         {/* Reasoning effort distribution */}
         {metrics.effortStats.some((e) => e.reasoningTokens > 0 || e.effort !== "default") ? (
           <section className="dshd-card">
@@ -1901,7 +1928,8 @@ export function DashboardView(props: DashboardViewProps): JSX.Element {
             ) : null}
           </section>
         ) : null}
-      </div>
+        </div>
+      </details>
       </>}
 
       {/* Request trend */}
